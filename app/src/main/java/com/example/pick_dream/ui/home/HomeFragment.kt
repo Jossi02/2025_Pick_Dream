@@ -54,9 +54,7 @@ class HomeFragment : Fragment() {
         listOf(binding.btnLlm, binding.btnSearch, binding.btnInquiry, binding.btnMap).forEach { button ->
             button.setOnClickListener { onButtonClick(it) }
         }
-        binding.btnNotice.setOnClickListener {
-            findNavController().navigate(R.id.action_homeFragment_to_noticeFragment)
-        }
+
         binding.cardReservationInfo.setOnClickListener {
             findNavController().navigate(R.id.action_homeFragment_to_reservationFragment)
         }
@@ -232,17 +230,23 @@ class HomeFragment : Fragment() {
 // --- ��¥ �Ľ� ��ƿ �Լ� ---
 
 /**
- * Firestore�� ����� �ѱ��� ��¥ ���ڿ��� Calendar ��ü�� ��ȯ�մϴ�.
- * ��(second) ���� ���İ� ������ ���� ��� �����մϴ�.
+ * Firestore에 저장된 한국어 날짜 문자열을 Calendar 객체로 변환합니다.
+ * 초(second) 단위가 포함되거나 포함되지 않은 경우를 처리합니다.
  */
 fun parseKoreanDateToCalendar(dateStr: String): Calendar? {
+    if (dateStr.isBlank()) return null
+    val normalized = dateStr
+        .replace("PM", "오후", ignoreCase = true)
+        .replace("AM", "오전", ignoreCase = true)
+
     val formats = listOf(
-        SimpleDateFormat("yyyy�� M�� d�� a h�� m�� s�� 'UTC+9'", Locale.KOREAN),
-        SimpleDateFormat("yyyy�� M�� d�� a h�� m��", Locale.KOREAN)
+        SimpleDateFormat("yyyy년 M월 d일 a h시 m분 s초 'UTC+9'", Locale.KOREAN),
+        SimpleDateFormat("yyyy년 M월 d일 a h시 m분 s초", Locale.KOREAN),
+        SimpleDateFormat("yyyy년 M월 d일 a h시 m분", Locale.KOREAN)
     )
     for (format in formats) {
         try {
-            return Calendar.getInstance().apply { time = format.parse(dateStr)!! }
+            return Calendar.getInstance().apply { time = format.parse(normalized)!! }
         } catch (e: Exception) {
             continue
         }

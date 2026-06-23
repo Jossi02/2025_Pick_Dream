@@ -72,23 +72,6 @@
                     android:textColor="#666666"
                     android:ellipsize="end"
                     android:maxLines="1" />
-
-                <!-- 공지사항 전체보기 버튼 -->
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnNotice"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:paddingLeft="3dp"
-                    android:paddingRight="3dp"
-                    android:paddingTop="1dp"
-                    android:paddingBottom="1dp"
-                    android:minWidth="1dp"
-                    android:minHeight="1dp"
-                    android:text="전체보기"
-                    android:textSize="10sp"
-                    android:textColor="#4267B2"
-                    app:backgroundTint="#CBE1FD"
-                    android:layout_marginStart="5dp"/>
             </LinearLayout>
 
             <View
