@@ -179,7 +179,8 @@ class ManualReservationInputFragment : Fragment() {
     }
 
     private fun showSuccessDialog() {
-        val dialogView = layoutInflater.inflate(R.layout.dialog_reservation_complete, null)
+        val dialogView = layoutInflater.inflate(R.layout.dialog_result, null)
+        dialogView.findViewById<TextView>(R.id.tvDialogMessage).text = "대여가 완료되었습니다."
         val dialog = androidx.appcompat.app.AlertDialog.Builder(requireContext(), R.style.CustomDialog)
             .setView(dialogView)
             .setCancelable(false)
