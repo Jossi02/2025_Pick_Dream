@@ -67,7 +67,7 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    tools:text="최신 공지사항을 불러오는 중..."
+                    android:text="최신 공지사항을 불러오는 중..."
                     android:textSize="14sp"
                     android:textColor="#666666"
                     android:ellipsize="end"
