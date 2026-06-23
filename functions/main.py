@@ -345,12 +345,20 @@ def handle_recommend_room(query, userID):
 
         # ✅ base_time에 사용 중인지 확인
         if require_available_now:
-            conflict = db.collection("Reservations") \
+            # Firestore에서는 복수 필드에 대한 부등호가 기본적으로 제한되므로
+            # 하나의 필터만 쓰고 나머지는 메모리에서 필터링하여 인덱스 오류 방지
+            conflicts = db.collection("Reservations") \
                 .where("roomID", "==", room_id) \
-                .where("startTimestamp", "<=", base_time) \
-                .where("endTimestamp", ">", base_time) \
-                .get()
-            if conflict:
+                .stream()
+            is_conflict = False
+            for c in conflicts:
+                c_data = c.to_dict()
+                c_start = c_data.get("startTimestamp")
+                c_end = c_data.get("endTimestamp")
+                if c_start and c_end and c_start <= base_time < c_end:
+                    is_conflict = True
+                    break
+            if is_conflict:
                 continue
 
         # 기자재 키워드 일치 점수 계산
