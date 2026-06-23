@@ -13,6 +13,7 @@ import androidx.fragment.app.viewModels
 import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.example.pick_dream.databinding.FragmentNoticeBinding
+import com.example.pick_dream.model.Notice
 
 class NoticeFragment : Fragment() {
 
@@ -88,7 +89,7 @@ class NoticeFragment : Fragment() {
         }
 
         viewModel.currentPage.observe(viewLifecycleOwner) {
-            setupPagination() // ÆäÀÌÁö³ª ÃÑ ÆäÀÌÁö ¼ö°¡ º¯°æµÉ ¶§¸¶´Ù UI ¾÷µ¥ÀÌÆ®
+            setupPagination() // í˜ì´ì§€ë‚˜ ì´ í˜ì´ì§€ ìˆ˜ê°€ ë³€ê²½ë  ë•Œë§ˆë‹¤ UI ì—…ë°ì´íŠ¸
         }
 
         viewModel.totalPages.observe(viewLifecycleOwner) {

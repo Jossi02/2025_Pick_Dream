@@ -1,14 +1,16 @@
-package com.example.pickdream.ui.home.notice
+package com.example.pick_dream.ui.home.notice
 
 import android.view.LayoutInflater
 import android.view.ViewGroup
+import androidx.recyclerview.widget.DiffUtil
+import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import com.example.pick_dream.databinding.ItemNoticeBinding
+import com.example.pick_dream.model.Notice
 
 class NoticeAdapter(
-    private var items: List<Notice>,
     private val onClick: (Notice) -> Unit
-) : RecyclerView.Adapter<NoticeAdapter.NoticeViewHolder>() {
+) : ListAdapter<Notice, NoticeAdapter.NoticeViewHolder>(NoticeDiffCallback()) {
 
     inner class NoticeViewHolder(val binding: ItemNoticeBinding) : RecyclerView.ViewHolder(binding.root) {
         fun bind(notice: Notice) {
@@ -26,13 +28,16 @@ class NoticeAdapter(
     }
 
     override fun onBindViewHolder(holder: NoticeViewHolder, position: Int) {
-        holder.bind(items[position])
+        holder.bind(getItem(position))
+    }
+}
+
+class NoticeDiffCallback : DiffUtil.ItemCallback<Notice>() {
+    override fun areItemsTheSame(oldItem: Notice, newItem: Notice): Boolean {
+        return oldItem.id == newItem.id
     }
 
-    override fun getItemCount() = items.size
-
-    fun updateItems(newItems: List<Notice>) {
-        items = newItems
-        notifyDataSetChanged()
+    override fun areContentsTheSame(oldItem: Notice, newItem: Notice): Boolean {
+        return oldItem == newItem
     }
 }

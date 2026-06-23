@@ -7,6 +7,7 @@ import android.view.ViewGroup
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.TextView
+import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
 import androidx.navigation.fragment.findNavController
@@ -58,12 +59,14 @@ class LectureRoomDetailFragment : Fragment() {
                 if (room.isRentalAvailable) "앱에서 바로 예약 가능" else "예약 불가"
 
             // 대여 가능 여부에 따라 버튼 상태 변경
-            val (bgColor, textColor) = if (room.isRentalAvailable) {
-                ContextCompat.getColor(requireContext(), R.color.primary_400) to
-                        ContextCompat.getColor(requireContext(), android.R.color.white)
+            val bgColor: Int
+            val textColor: Int
+            if (room.isRentalAvailable) {
+                bgColor = ContextCompat.getColor(requireContext(), R.color.primary_400)
+                textColor = ContextCompat.getColor(requireContext(), android.R.color.white)
             } else {
-                ContextCompat.getColor(requireContext(), R.color.neutral_200) to
-                        ContextCompat.getColor(requireContext(), R.color.neutral_400)
+                bgColor = ContextCompat.getColor(requireContext(), R.color.neutral_200)
+                textColor = ContextCompat.getColor(requireContext(), R.color.neutral_400)
             }
             binding.btnReserve.isEnabled = room.isRentalAvailable
             binding.btnReserve.setBackgroundColor(bgColor)
