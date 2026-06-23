@@ -3,18 +3,24 @@ package com.example.pick_dream.ui.login
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.util.Log
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.example.pick_dream.MainActivity
-import com.google.firebase.auth.FirebaseAuth
 import com.example.pick_dream.R
+import com.google.firebase.auth.FirebaseAuth
 
 class LoginActivity : AppCompatActivity() {
 
     private lateinit var auth: FirebaseAuth
+
+    // ÇĞ¹øÀ¸·Î Firebase Auth ÀÎÁõ¿¡ »ç¿ëÇÒ ÀÌ¸ŞÀÏ µµ¸ŞÀÎ
+    private val EMAIL_DOMAIN = "@example.com"
+    // ºñ¹Ğ¹øÈ£ ºĞ½Ç ½Ã ¿¬°áÇÒ ÇĞ±³ Æ÷ÅĞ URL
+    private val PORTAL_URL = "https://kutis.kyonggi.ac.kr/webkutis/view/indexWeb.jsp"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -32,22 +38,21 @@ class LoginActivity : AppCompatActivity() {
             val password = passwordEditText.text.toString().trim()
 
             if (id.isEmpty() || password.isEmpty()) {
-                Toast.makeText(this, "í•™ë²ˆê³¼ ë¹„ë°€ë²ˆí˜¸ë¥¼ ì…ë ¥í•˜ì„¸ìš”", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "ÇĞ¹ø°ú ºñ¹Ğ¹øÈ£¸¦ ÀÔ·ÂÇÏ¼¼¿ä", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
 
-            val dummyEmail = "${id}@example.com"
-
+            val dummyEmail = ""
             auth.signInWithEmailAndPassword(dummyEmail, password)
                 .addOnCompleteListener { task ->
                     if (task.isSuccessful) {
-                        val intent = Intent(this, MainActivity::class.java)
-                        startActivity(intent)
+                        startActivity(Intent(this, MainActivity::class.java))
                         finish()
                     } else {
+                        Log.e("LoginActivity", "Login failed", task.exception)
                         Toast.makeText(
                             this,
-                            "ë¡œê·¸ì¸ ì‹¤íŒ¨: ${task.exception?.message}",
+                            "·Î±×ÀÎ ½ÇÆĞ: ",
                             Toast.LENGTH_SHORT
                         ).show()
                     }
@@ -55,13 +60,11 @@ class LoginActivity : AppCompatActivity() {
         }
 
         forgotPasswordTextView.setOnClickListener {
-            val url = "https://kutis.kyonggi.ac.kr/webkutis/view/indexWeb.jsp"
-            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
             try {
-                startActivity(intent)
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(PORTAL_URL)))
             } catch (e: Exception) {
-                Toast.makeText(this, "ì›¹ í˜ì´ì§€ë¥¼ ì—´ ìˆ˜ ì—†ìŠµë‹ˆë‹¤.", Toast.LENGTH_SHORT).show()
-                e.printStackTrace()
+                Log.e("LoginActivity", "Failed to open browser", e)
+                Toast.makeText(this, "À¥ ÆäÀÌÁö¸¦ ¿­ ¼ö ¾ø½À´Ï´Ù.", Toast.LENGTH_SHORT).show()
             }
         }
     }

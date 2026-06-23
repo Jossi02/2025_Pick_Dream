@@ -7,8 +7,12 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import androidx.fragment.app.Fragment
-import com.example.pick_dream.databinding.FragmentMypageBinding
 import androidx.fragment.app.viewModels
+import com.example.pick_dream.databinding.FragmentMypageBinding
+import com.example.pick_dream.ui.login.LoginActivity
+import com.example.pick_dream.ui.mypage.inquiry.InquiryActivity
+import com.example.pick_dream.ui.mypage.review.ReviewActivity
+import com.example.pick_dream.ui.mypage.setting.SettingActivity
 import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.example.pick_dream.R
 
@@ -18,59 +22,56 @@ class MypageFragment : Fragment() {
     private val binding get() = _binding!!
     private val viewModel: MyPageViewModel by viewModels()
 
+    override fun onCreateView(
+        inflater: LayoutInflater,
+        container: ViewGroup?,
+        savedInstanceState: Bundle?
+    ): View {
+        _binding = FragmentMypageBinding.inflate(inflater, container, false)
+        return binding.root
+    }
+
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
+        setupClickListeners()
+        observeViewModel()
+        viewModel.loadUserData()
+    }
+
+    private fun observeViewModel() {
         viewModel.userData.observe(viewLifecycleOwner) { user ->
+            if (user == null) return@observe
             binding.userName.text = user.name
             binding.userEmail.text = user.email
             binding.userMajor.text = user.major
             binding.userId.text = user.studentId
         }
-
-        viewModel.loadUserData()
-
     }
 
-
-    override fun onCreateView(
-        inflater: LayoutInflater,
-        container: ViewGroup?,
-        savedInstanceState: Bundle?
-
-    ): View {
-        _binding = FragmentMypageBinding.inflate(inflater, container, false)
-        val view = binding.root
-
-        binding.logoutTextView.paintFlags = binding.logoutTextView.paintFlags or Paint.UNDERLINE_TEXT_FLAG
+    private fun setupClickListeners() {
+        binding.logoutTextView.paintFlags =
+            binding.logoutTextView.paintFlags or Paint.UNDERLINE_TEXT_FLAG
 
         binding.logoutTextView.setOnClickListener {
-            val intent = Intent(requireContext(), com.example.pick_dream.ui.login.LoginActivity::class.java)
-            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            val intent = Intent(requireContext(), LoginActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            }
             startActivity(intent)
             requireActivity().finish()
         }
 
         binding.reviewButtonCard.setOnClickListener {
-            val intent = Intent(requireContext(), com.example.pick_dream.ui.mypage.review.ReviewActivity::class.java)
-            startActivity(intent)
+            startActivity(Intent(requireContext(), ReviewActivity::class.java))
         }
 
         binding.inquiryButtonCard.setOnClickListener {
-            val intent = Intent(requireContext(), com.example.pick_dream.ui.mypage.inquiry.InquiryActivity::class.java)
-            startActivity(intent)
+            startActivity(Intent(requireContext(), InquiryActivity::class.java))
         }
 
         binding.settingButtonCard.setOnClickListener {
-            val intent = Intent(requireContext(), com.example.pick_dream.ui.mypage.setting.SettingActivity::class.java)
-            startActivity(intent)
+            startActivity(Intent(requireContext(), SettingActivity::class.java))
         }
-        return view
-    }
-
-    override fun onDestroyView() {
-        super.onDestroyView()
-        _binding = null
     }
 
     override fun onResume() {
@@ -80,5 +81,10 @@ class MypageFragment : Fragment() {
         if (navView?.selectedItemId != R.id.navigation_mypage) {
             navView?.selectedItemId = R.id.navigation_mypage
         }
+    }
+
+    override fun onDestroyView() {
+        super.onDestroyView()
+        _binding = null
     }
 }

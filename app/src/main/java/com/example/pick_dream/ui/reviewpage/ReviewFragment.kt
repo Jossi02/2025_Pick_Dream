@@ -26,9 +26,7 @@ class ReviewFragment : Fragment() {
 
     private val args: ReviewFragmentArgs by navArgs()
 
-    private val starIds = listOf(
-        R.id.star1, R.id.star2, R.id.star3, R.id.star4, R.id.star5
-    )
+    private val starIds = listOf(R.id.star1, R.id.star2, R.id.star3, R.id.star4, R.id.star5)
     private var selectedStars = 0
 
     override fun onCreateView(
@@ -44,8 +42,20 @@ class ReviewFragment : Fragment() {
 
         requireActivity().findViewById<View>(R.id.nav_view)?.visibility = View.GONE
 
-        binding.tvGuideText.text = "${args.roomId} Ïù¥Ïö© ÌõÑÍ∏∞Î•º ÎÇ®Í≤®Ï£ºÏÑ∏Ïöî!"
+        binding.tvGuideText.text = " ¿ÃøÎ »ƒ±‚∏¶ ≥≤∞‹¡÷ººø‰!"
 
+        setupStarRating()
+        setupCheckBoxStyle(binding.layoutPurpose)
+        setupCheckBoxStyle(binding.layoutEquip)
+
+        binding.btnSubmit.setOnClickListener { submitReview() }
+        binding.btnClose.setOnClickListener { findNavController().popBackStack() }
+    }
+
+    /**
+     * ∫∞¡° º±≈√ UI∏¶ √ ±‚»≠«’¥œ¥Ÿ.
+     */
+    private fun setupStarRating() {
         val starViews = starIds.map { binding.root.findViewById<ImageView>(it) }
         starViews.forEachIndexed { index, imageView ->
             imageView.setOnClickListener {
@@ -54,81 +64,73 @@ class ReviewFragment : Fragment() {
             }
         }
         updateStars(starViews, selectedStars)
+    }
 
-        for (i in 0 until binding.layoutPurpose.childCount) {
-            val cb = binding.layoutPurpose.getChildAt(i)
-            if (cb is CheckBox) {
-                cb.buttonDrawable = ContextCompat.getDrawable(requireContext(), R.drawable.checkbox_selector)
+    /**
+     * ∑π¿Ãæ∆øÙ ≥ª ∏µÁ CheckBoxø° ƒøΩ∫≈“ drawable¿ª ¿˚øÎ«’¥œ¥Ÿ.
+     * @param layout CheckBoxµÈ¿ª ∆˜«‘«œ¥¬ ViewGroup
+     */
+    private fun setupCheckBoxStyle(layout: ViewGroup) {
+        for (i in 0 until layout.childCount) {
+            val child = layout.getChildAt(i)
+            if (child is CheckBox) {
+                child.buttonDrawable =
+                    ContextCompat.getDrawable(requireContext(), R.drawable.checkbox_selector)
             }
-        }
-
-        for (i in 0 until binding.layoutEquip.childCount) {
-            val cb = binding.layoutEquip.getChildAt(i)
-            if (cb is CheckBox) {
-                cb.buttonDrawable = ContextCompat.getDrawable(requireContext(), R.drawable.checkbox_selector)
-            }
-        }
-
-        binding.btnSubmit.setOnClickListener {
-            submitReview()
-        }
-
-        binding.btnClose.setOnClickListener {
-            findNavController().popBackStack()
         }
     }
 
     private fun getCheckedTexts(layout: ViewGroup): List<String> {
-        val checkedTexts = mutableListOf<String>()
-        for (i in 0 until layout.childCount) {
-            val cb = layout.getChildAt(i)
-            if (cb is CheckBox && cb.isChecked) {
-                checkedTexts.add(cb.text.toString().trim())
-            }
-        }
-        return checkedTexts
+        return (0 until layout.childCount)
+            .mapNotNull { layout.getChildAt(it) as? CheckBox }
+            .filter { it.isChecked }
+            .map { it.text.toString().trim() }
     }
-    
-    private fun submitReview() {
-        binding.btnSubmit.isEnabled = false // Ï§ëÎ≥µ Ï†úÏ∂ú Î∞©ÏßÄ
-        
-        val db = FirebaseFirestore.getInstance()
-        val currentUser = FirebaseAuth.getInstance().currentUser
 
+    private fun submitReview() {
+        binding.btnSubmit.isEnabled = false // ¡ﬂ∫π ¡¶√‚ πÊ¡ˆ
+
+        val currentUser = FirebaseAuth.getInstance().currentUser
         if (currentUser == null) {
-            Toast.makeText(context, "Î°úÍ∑∏Ïù∏Ïù¥ ÌïÑÏöîÌï©ÎãàÎã§.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "∑Œ±◊¿Œ¿Ã « ø‰«’¥œ¥Ÿ.", Toast.LENGTH_SHORT).show()
             binding.btnSubmit.isEnabled = true
             return
         }
-        
-        db.collection("User").document(currentUser.uid).get().addOnSuccessListener { userDoc ->
-            val studentId = userDoc.getString("studentId") ?: userDoc.getString("userID")
-            if (studentId.isNullOrBlank()) {
-                Toast.makeText(context, "ÏÇ¨Ïö©Ïûê Ï†ïÎ≥¥Î•º Ï∞æÏùÑ Ïàò ÏóÜÏäµÎãàÎã§.", Toast.LENGTH_SHORT).show()
-                binding.btnSubmit.isEnabled = true
-                return@addOnSuccessListener
-            }
 
-            val review = Review(
-                userID = studentId,
-                roomID = args.roomId,
-                rating = selectedStars.toFloat(),
-                comment = binding.etComment.text.toString(),
-                purpose = getCheckedTexts(binding.layoutPurpose),
-                equipment = getCheckedTexts(binding.layoutEquip)
-            )
-
-            db.collection("Reviews").add(review)
-                .addOnSuccessListener {
-                    Log.d("ReviewFragment", "Review successfully submitted")
-                    findNavController().navigate(R.id.action_reviewFragment_to_reviewCompleteFragment)
-                }
-                .addOnFailureListener { e ->
-                    Log.w("ReviewFragment", "Error adding review", e)
-                    Toast.makeText(context, "Î¶¨Î∑∞ Ï†úÏ∂úÏóê Ïã§Ìå®ÌñàÏäµÎãàÎã§.", Toast.LENGTH_SHORT).show()
+        FirebaseFirestore.getInstance()
+            .collection("User").document(currentUser.uid).get()
+            .addOnSuccessListener { userDoc ->
+                val studentId = userDoc.getString("studentId") ?: userDoc.getString("userID")
+                if (studentId.isNullOrBlank()) {
+                    Toast.makeText(context, "ªÁøÎ¿⁄ ¡§∫∏∏¶ √£¿ª ºˆ æ¯Ω¿¥œ¥Ÿ.", Toast.LENGTH_SHORT).show()
                     binding.btnSubmit.isEnabled = true
+                    return@addOnSuccessListener
                 }
-        }
+
+                val review = Review(
+                    userID = studentId,
+                    roomID = args.roomId,
+                    rating = selectedStars.toFloat(),
+                    comment = binding.etComment.text.toString(),
+                    purpose = getCheckedTexts(binding.layoutPurpose),
+                    equipment = getCheckedTexts(binding.layoutEquip)
+                )
+
+                FirebaseFirestore.getInstance().collection("Reviews").add(review)
+                    .addOnSuccessListener {
+                        Log.d("ReviewFragment", "Review successfully submitted")
+                        findNavController().navigate(R.id.action_reviewFragment_to_reviewCompleteFragment)
+                    }
+                    .addOnFailureListener { e ->
+                        Log.e("ReviewFragment", "Error submitting review", e)
+                        Toast.makeText(context, "∏Æ∫‰ ¡¶√‚ø° Ω«∆–«ﬂΩ¿¥œ¥Ÿ.", Toast.LENGTH_SHORT).show()
+                        binding.btnSubmit.isEnabled = true
+                    }
+            }
+            .addOnFailureListener { e ->
+                Log.e("ReviewFragment", "Failed to fetch user info", e)
+                binding.btnSubmit.isEnabled = true
+            }
     }
 
     private fun updateStars(starViews: List<ImageView>, selectedCount: Int) {
