@@ -41,10 +41,11 @@ class HomeFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        // ������ �ε� ��, ���� ���� ���� ����� �̸� ����
-        binding.layoutReservationDetails.visibility = View.INVISIBLE
-        binding.layoutNoReservation.visibility = View.INVISIBLE
-        binding.flReservationStatusVisual.visibility = View.INVISIBLE
+        // 화면 로드 시 로딩 상태 표시
+        binding.layoutReservationDetails.visibility = View.GONE
+        binding.flReservationStatusVisual.visibility = View.GONE
+        binding.layoutNoReservation.visibility = View.VISIBLE
+        binding.tvNoReservationMessage.text = "예약 정보를 불러오는 중입니다..."
 
         setupClickListeners()
     }
@@ -126,6 +127,7 @@ class HomeFragment : Fragment() {
 
         if (reservation == null) {
             binding.layoutNoReservation.visibility = View.VISIBLE
+            binding.tvNoReservationMessage.text = "현재 진행 중인 예약이 없습니다.\n"
             binding.layoutReservationDetails.visibility = View.GONE
             binding.flReservationStatusVisual.visibility = View.GONE
             return
