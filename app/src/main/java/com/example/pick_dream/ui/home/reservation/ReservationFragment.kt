@@ -1,7 +1,6 @@
 package com.example.pick_dream.ui.home.reservation
 
 import android.os.Bundle
-import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -9,19 +8,12 @@ import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.core.os.bundleOf
 import androidx.fragment.app.Fragment
+import androidx.fragment.app.viewModels
 import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.example.pick_dream.R
 import com.example.pick_dream.databinding.FragmentReservationBinding
 import com.example.pick_dream.model.Reservation
-import com.google.android.gms.tasks.Tasks
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.DocumentSnapshot
-import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.Query
-import com.google.firebase.firestore.ktx.toObject
-import java.text.SimpleDateFormat
-import java.util.*
 
 sealed class ReservationListItem {
     data class Header(val title: String) : ReservationListItem()
@@ -33,6 +25,7 @@ class ReservationFragment : Fragment() {
     private val binding get() = _binding!!
 
     private lateinit var adapter: ReservationAdapter
+    private val viewModel: ReservationViewModel by viewModels()
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?
@@ -43,12 +36,13 @@ class ReservationFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        
         setupRecyclerView()
-        loadReservations()
+        setupListeners()
+        observeViewModel()
 
-        binding.btnBack.setOnClickListener {
-            findNavController().popBackStack()
-        }
+        // È­¸é ÁøÀÔ ½Ã ¿¹¾à ¸ñ·Ï ºÒ·¯¿À±â
+        viewModel.loadReservations()
     }
 
     private fun setupRecyclerView() {
@@ -61,175 +55,54 @@ class ReservationFragment : Fragment() {
         binding.rvReservations.adapter = adapter
     }
 
-    private fun loadReservations() {
-        binding.progressBar.visibility = View.VISIBLE
-        val db = FirebaseFirestore.getInstance()
-        val currentUser = FirebaseAuth.getInstance().currentUser ?: return
+    private fun setupListeners() {
+        binding.btnBack.setOnClickListener {
+            findNavController().popBackStack()
+        }
+    }
 
-        db.collection("User").document(currentUser.uid).get().addOnSuccessListener { userDoc ->
-            val studentId = userDoc.getString("studentId") ?: userDoc.getString("userID")
-            if (studentId.isNullOrBlank()) {
-                binding.progressBar.visibility = View.GONE
+    private fun observeViewModel() {
+        viewModel.listItems.observe(viewLifecycleOwner) { items ->
+            adapter.submitList(items)
+            if (items.isEmpty()) {
                 binding.tvEmptyState.visibility = View.VISIBLE
-                return@addOnSuccessListener
-            }
-
-                        db.collection("Reservations")
-                .whereEqualTo("userID", studentId)
-                .orderBy("startTime", Query.Direction.DESCENDING)
-                            .get()
-                .addOnSuccessListener { reservationSnapshot ->
-                                    binding.progressBar.visibility = View.GONE
-                    if (reservationSnapshot.isEmpty) {
-                        binding.tvEmptyState.visibility = View.VISIBLE
-                        return@addOnSuccessListener
-                    }
-
-                    val reservations = reservationSnapshot.documents.mapNotNull {
-                        it.toObject<Reservation>()?.apply { documentId = it.id }
-                    }
-                    fetchRoomDetailsFor(reservations)
-                }
-                .addOnFailureListener {
-                    binding.progressBar.visibility = View.GONE
-                    Toast.makeText(context, "ì˜ˆì•½ ì •ë³´ë¥¼ ë¶ˆëŸ¬ì˜¤ëŠ”ë° ì‹¤íŒ¨í–ˆìŠµë‹ˆë‹¤.", Toast.LENGTH_SHORT).show()
-                }
-        }
-    }
-
-    private fun fetchRoomDetailsFor(reservations: List<Reservation>) {
-        val db = FirebaseFirestore.getInstance()
-        val roomIds = reservations.map { it.roomID }.distinct().filter { it.isNotBlank() }
-
-        if (roomIds.isEmpty()) {
-            processAndDisplayReservations(reservations, emptyMap())
-            return
-        }
-
-        val tasks = roomIds.map { db.collection("rooms").document(it).get() }
-
-        Tasks.whenAllSuccess<DocumentSnapshot>(tasks).addOnSuccessListener { documents ->
-            val roomImageUrls = documents.filter { it.exists() }
-                .associate { it.id to it.getString("image") }
-            processAndDisplayReservations(reservations, roomImageUrls)
-        }.addOnFailureListener {
-            Log.e("ReservationFragment", "Failed to fetch room details", it)
-            processAndDisplayReservations(reservations, emptyMap())
-        }
-    }
-
-    private fun parseFlexibleDate(dateString: String?): Date? {
-        if (dateString.isNullOrBlank()) return null
-
-        // Normalize AM/PM markers for Korean locale
-        val normalizedDateString = dateString
-            .replace("PM", "ì˜¤í›„", ignoreCase = true)
-            .replace("AM", "ì˜¤ì „", ignoreCase = true)
-
-        // List of possible date formats
-        val dateFormats = listOf(
-            SimpleDateFormat("yyyyë…„ Mì›” dì¼ a hì‹œ më¶„ sì´ˆ 'UTC+9'", Locale.KOREAN),
-            SimpleDateFormat("yyyyë…„ Mì›” dì¼ a hì‹œ më¶„ sì´ˆ", Locale.KOREAN),
-            SimpleDateFormat("yyyyë…„ Mì›” dì¼ a hì‹œ më¶„", Locale.KOREAN)
-        )
-
-        for (format in dateFormats) {
-            try {
-                return format.parse(normalizedDateString)
-            } catch (e: java.text.ParseException) {
-                // Ignore and try the next format
-            }
-        }
-
-        Log.e("ReservationFragment", "Could not parse date: $dateString with any known format.")
-        return null
-    }
-
-    private fun processAndDisplayReservations(reservations: List<Reservation>, roomImageUrls: Map<String, String?>) {
-        val now = Date()
-        val upcomingReservations = mutableListOf<Reservation>()
-        val pastReservations = mutableListOf<Reservation>()
-
-        reservations.forEach { reservation ->
-            val endTime = parseFlexibleDate(reservation.endTime)
-            if (endTime != null && endTime.after(now)) {
-                upcomingReservations.add(reservation)
+                binding.rvReservations.visibility = View.GONE
             } else {
-                // Also handles cases where endTime is null or unparseable
-                pastReservations.add(reservation)
-            }
-        }
-        
-        // ë‹¤ê°€ì˜¤ëŠ” ì˜ˆì•½ì€ ì‹œì‘ ì‹œê°„ ì˜¤ë¦„ì°¨ìˆœìœ¼ë¡œ ì •ë ¬
-        upcomingReservations.sortBy {
-            parseFlexibleDate(it.startTime)?.time ?: Long.MAX_VALUE
-        }
-
-        val listItems = mutableListOf<ReservationListItem>()
-        if (upcomingReservations.isNotEmpty()) {
-            listItems.add(ReservationListItem.Header("í˜„ì¬ ì˜ˆì•½ ë° ì˜ˆì •ëœ ì˜ˆì•½"))
-            upcomingReservations.forEach {
-                val imageUrl = roomImageUrls[it.roomID]
-                listItems.add(ReservationListItem.ReservationItem(it, imageUrl))
-            }
-        }
-        if (pastReservations.isNotEmpty()) {
-            listItems.add(ReservationListItem.Header("ì§€ë‚œ ì˜ˆì•½"))
-            pastReservations.forEach {
-                val imageUrl = roomImageUrls[it.roomID]
-                listItems.add(ReservationListItem.ReservationItem(it, imageUrl))
+                binding.tvEmptyState.visibility = View.GONE
+                binding.rvReservations.visibility = View.VISIBLE
             }
         }
 
-        if (listItems.isEmpty()) {
-            binding.tvEmptyState.visibility = View.VISIBLE
-            binding.rvReservations.visibility = View.GONE
-        } else {
-            binding.tvEmptyState.visibility = View.GONE
-            binding.rvReservations.visibility = View.VISIBLE
+        viewModel.isLoading.observe(viewLifecycleOwner) { isLoading ->
+            binding.progressBar.visibility = if (isLoading) View.VISIBLE else View.GONE
         }
-        adapter.submitList(listItems)
+
+        viewModel.message.observe(viewLifecycleOwner) { msg ->
+            if (msg.isNotBlank()) {
+                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     private fun confirmCancellation(reservation: Reservation) {
         AlertDialog.Builder(requireContext())
-            .setTitle("ì˜ˆì•½ ì·¨ì†Œ")
-            .setMessage("${reservation.roomID} ì˜ˆì•½ì„ ì •ë§ë¡œ ì·¨ì†Œí•˜ì‹œê² ìŠµë‹ˆê¹Œ?")
-            .setPositiveButton("í™•ì¸") { _, _ ->
-                cancelReservation(reservation)
+            .setTitle("¿¹¾à Ãë¼Ò")
+            .setMessage(" ¿¹¾àÀ» Á¤¸»·Î Ãë¼ÒÇÏ½Ã°Ú½À´Ï±î?")
+            .setPositiveButton("È®ÀÎ") { _, _ ->
+                viewModel.cancelReservation(reservation)
             }
-            .setNegativeButton("ì·¨ì†Œ", null)
+            .setNegativeButton("Ãë¼Ò", null)
             .show()
     }
 
-    private fun cancelReservation(reservation: Reservation) {
-        val docId = reservation.documentId
-        if (docId.isNullOrEmpty()) {
-            Toast.makeText(context, "ì˜ˆì•½ IDê°€ ì—†ì–´ ì·¨ì†Œí•  ìˆ˜ ì—†ìŠµë‹ˆë‹¤.", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        val db = FirebaseFirestore.getInstance()
-        db.collection("Reservations").document(docId)
-            .delete()
-            .addOnSuccessListener {
-                Toast.makeText(context, "ì˜ˆì•½ì´ ì·¨ì†Œë˜ì—ˆìŠµë‹ˆë‹¤.", Toast.LENGTH_SHORT).show()
-                loadReservations() // ëª©ë¡ ìƒˆë¡œê³ ì¹¨
-            }
-            .addOnFailureListener {
-                Toast.makeText(context, "ì˜ˆì•½ ì·¨ì†Œì— ì‹¤íŒ¨í–ˆìŠµë‹ˆë‹¤.", Toast.LENGTH_SHORT).show()
-            }
-    }
-
     private fun showReservationDetails(reservation: Reservation) {
-        // ìƒì„¸ ì •ë³´ ë³´ê¸° ë¡œì§ (ì˜ˆ: BottomSheetDialogFragment)
-        // Toast.makeText(context, "${reservation.roomID} ìƒì„¸ ë³´ê¸°", Toast.LENGTH_SHORT).show()
+        // »ó¼¼ Á¤º¸ º¸±â ·ÎÁ÷ (¿¹: BottomSheetDialogFragment)
     }
     
     private fun navigateToWriteReview(reservation: Reservation){
         val roomId = reservation.roomID
-        if (roomId.isNullOrEmpty()) {
-            Toast.makeText(context, "ê°•ì˜ì‹¤ ì •ë³´ê°€ ì—†ì–´ í›„ê¸°ë¥¼ ì‘ì„±í•  ìˆ˜ ì—†ìŠµë‹ˆë‹¤.", Toast.LENGTH_SHORT).show()
+        if (roomId.isBlank()) {
+            Toast.makeText(context, "°­ÀÇ½Ç Á¤º¸°¡ ¾ø¾î ÈÄ±â¸¦ ÀÛ¼ºÇÒ ¼ö ¾ø½À´Ï´Ù.", Toast.LENGTH_SHORT).show()
             return
         }
         val bundle = bundleOf("roomId" to roomId)
@@ -240,4 +113,4 @@ class ReservationFragment : Fragment() {
         super.onDestroyView()
         _binding = null
     }
-} 
+}

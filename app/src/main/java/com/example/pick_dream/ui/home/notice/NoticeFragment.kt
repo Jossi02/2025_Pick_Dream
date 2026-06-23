@@ -1,69 +1,18 @@
 package com.example.pick_dream.ui.home.notice
 
+import android.graphics.Color
+import android.graphics.Typeface
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import androidx.fragment.app.Fragment
-import androidx.navigation.fragment.findNavController
-import androidx.recyclerview.widget.DiffUtil
-import androidx.recyclerview.widget.ListAdapter
-import androidx.recyclerview.widget.RecyclerView
-import android.graphics.Color
-import android.graphics.Typeface
-import android.widget.TextView
-import com.example.pick_dream.databinding.FragmentNoticeBinding
-import com.example.pick_dream.databinding.ItemNoticeBinding
-import androidx.recyclerview.widget.LinearLayoutManager
-import com.google.firebase.firestore.ktx.firestore
-import com.google.firebase.ktx.Firebase
-import java.text.SimpleDateFormat
-import java.util.Locale
 import android.view.inputmethod.EditorInfo
-import android.widget.LinearLayout
-
-
-data class Notice(
-    val id: String,
-    val iconEmoji: String,
-    val title: String,
-    val date: String,
-    val content: String
-)
-
-class NoticeDiffCallback : DiffUtil.ItemCallback<Notice>() {
-    override fun areItemsTheSame(oldItem: Notice, newItem: Notice): Boolean {
-        return oldItem.id == newItem.id
-    }
-
-    override fun areContentsTheSame(oldItem: Notice, newItem: Notice): Boolean {
-        return oldItem == newItem
-    }
-}
-
-class NoticeAdapter(
-    private val onClick: (Notice) -> Unit
-) : ListAdapter<Notice, NoticeAdapter.NoticeViewHolder>(NoticeDiffCallback()) {
-
-    inner class NoticeViewHolder(private val binding: ItemNoticeBinding) :
-        RecyclerView.ViewHolder(binding.root) {
-        fun bind(notice: Notice) {
-            binding.tvIcon.text = if (notice.title.contains("[Ïù¥Î≤§Ìä∏]")) "üéâ" else "üì¢"
-            binding.tvTitle.text = notice.title
-            binding.tvDate.text = notice.date
-            binding.root.setOnClickListener { onClick(notice) }
-        }
-    }
-
-    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): NoticeViewHolder {
-        val binding = ItemNoticeBinding.inflate(LayoutInflater.from(parent.context), parent, false)
-        return NoticeViewHolder(binding)
-    }
-
-    override fun onBindViewHolder(holder: NoticeViewHolder, position: Int) {
-        holder.bind(getItem(position))
-    }
-}
+import android.widget.TextView
+import androidx.fragment.app.Fragment
+import androidx.fragment.app.viewModels
+import androidx.navigation.fragment.findNavController
+import androidx.recyclerview.widget.LinearLayoutManager
+import com.example.pick_dream.databinding.FragmentNoticeBinding
 
 class NoticeFragment : Fragment() {
 
@@ -71,12 +20,7 @@ class NoticeFragment : Fragment() {
     private val binding get() = _binding!!
 
     private lateinit var adapter: NoticeAdapter
-
-    private lateinit var sampleList: List<Notice>
-    private lateinit var allNotices: List<Notice>
-    private var currentPage = 1
-    private val pageSize = 8
-    private var totalPages = 1
+    private val viewModel: NoticeViewModel by viewModels()
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?,
@@ -86,25 +30,15 @@ class NoticeFragment : Fragment() {
         return binding.root
     }
 
-
-    private fun showPage(page: Int) {
-        val fromIndex = (page - 1) * pageSize
-        val toIndex = minOf(fromIndex + pageSize, allNotices.size)
-        if (fromIndex < toIndex) {
-            val pageList = allNotices.subList(fromIndex, toIndex)
-            adapter.submitList(pageList)
-        } else {
-            adapter.submitList(emptyList())
-        }
-    }
-
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        binding.btnBack.setOnClickListener {
-            findNavController().popBackStack()
-        }
+        setupRecyclerView()
+        setupListeners()
+        observeViewModel()
+    }
 
+    private fun setupRecyclerView() {
         adapter = NoticeAdapter { notice ->
             val action = NoticeFragmentDirections.actionNoticeFragmentToNoticeDetailFragment(
                 title = notice.title,
@@ -115,30 +49,12 @@ class NoticeFragment : Fragment() {
         }
         binding.rvNotice.layoutManager = LinearLayoutManager(requireContext())
         binding.rvNotice.adapter = adapter
+    }
 
-        val db = Firebase.firestore
-        val formatter = SimpleDateFormat("yy.MM.dd", Locale.getDefault())
-
-        db.collection("Notices")
-            .get()
-            .addOnSuccessListener { result ->
-                allNotices = result.map { doc ->
-                    val timestamp = doc.getTimestamp("createdAt")
-                    val formattedDate = timestamp?.toDate()?.let { formatter.format(it) } ?: ""
-
-                    Notice(
-                        id = doc.id,
-                        iconEmoji = "üì¢",
-                        title = doc.getString("title") ?: "",
-                        date = formattedDate,
-                        content = doc.getString("content") ?: ""
-                    )
-                }
-                totalPages = (allNotices.size + pageSize - 1) / pageSize
-                currentPage = 1
-                showPage(currentPage)
-                setupPagination()
-            }
+    private fun setupListeners() {
+        binding.btnBack.setOnClickListener {
+            findNavController().popBackStack()
+        }
 
         binding.btnSearch.setOnClickListener {
             performSearch()
@@ -151,42 +67,32 @@ class NoticeFragment : Fragment() {
             }
             false
         }
+
+        binding.tvPrev.setOnClickListener {
+            viewModel.prevPage()
+        }
+
+        binding.tvNext.setOnClickListener {
+            viewModel.nextPage()
+        }
     }
 
     private fun performSearch() {
-            val query = binding.etSearch.text.toString().trim()
-        val db = Firebase.firestore
-        val formatter = SimpleDateFormat("yy.MM.dd", Locale.getDefault())
+        val query = binding.etSearch.text.toString()
+        viewModel.searchNotices(query)
+    }
 
-        db.collection("Notices")
-            .get()
-            .addOnSuccessListener { result ->
-                val originalNotices = result.map { doc ->
-                    val timestamp = doc.getTimestamp("createdAt")
-                    val formattedDate = timestamp?.toDate()?.let { formatter.format(it) } ?: ""
-                    Notice(
-                        id = doc.id,
-                        iconEmoji = "üì¢",
-                        title = doc.getString("title") ?: "",
-                        date = formattedDate,
-                        content = doc.getString("content") ?: ""
-                    )
-                }
+    private fun observeViewModel() {
+        viewModel.pagedNotices.observe(viewLifecycleOwner) { notices ->
+            adapter.submitList(notices)
+        }
 
-                if (query.isNotEmpty()) {
-                    val filtered = originalNotices.filter {
-                        it.title.contains(query, ignoreCase = true) || it.content.contains(query, ignoreCase = true)
-                }
-                allNotices = filtered
-            } else {
-                    allNotices = originalNotices
-                }
+        viewModel.currentPage.observe(viewLifecycleOwner) {
+            setupPagination() // ∆‰¿Ã¡ˆ≥™ √— ∆‰¿Ã¡ˆ ºˆ∞° ∫Ø∞Êµ… ∂ß∏∂¥Ÿ UI æ˜µ•¿Ã∆Æ
+        }
 
-                totalPages = (allNotices.size + pageSize - 1) / pageSize
-                if (totalPages == 0) totalPages = 1
-                currentPage = 1
-                showPage(currentPage)
-                setupPagination()
+        viewModel.totalPages.observe(viewLifecycleOwner) {
+            setupPagination()
         }
     }
 
@@ -194,30 +100,14 @@ class NoticeFragment : Fragment() {
         val pagesContainer = binding.pagesContainer
         pagesContainer.removeAllViews()
 
-        binding.tvPrev.setOnClickListener {
-            if (currentPage > 1) {
-                currentPage--
-                showPage(currentPage)
-                setupPagination()
-            }
-        }
+        val currentPage = viewModel.currentPage.value ?: 1
+        val totalPages = viewModel.totalPages.value ?: 1
 
-        // ÌéòÏù¥ÏßÄ Î≤àÌò∏ ÏÉùÏÑ±
         for (i in 1..totalPages) {
             val pageButton = createPageButton(i.toString(), i == currentPage) {
-                currentPage = i
-                showPage(currentPage)
-                setupPagination()
+                viewModel.setPage(i)
             }
             pagesContainer.addView(pageButton)
-        }
-
-        binding.tvNext.setOnClickListener {
-            if (currentPage < totalPages) {
-                currentPage++
-                showPage(currentPage)
-                setupPagination()
-            }
         }
     }
 
@@ -233,7 +123,6 @@ class NoticeFragment : Fragment() {
         tv.isFocusable = true
         return tv
     }
-
 
     override fun onDestroyView() {
         super.onDestroyView()

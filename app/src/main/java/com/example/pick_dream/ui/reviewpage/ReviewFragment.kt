@@ -10,14 +10,17 @@ import android.widget.ImageView
 import android.widget.Toast
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
+import androidx.lifecycle.lifecycleScope
 import androidx.navigation.fragment.findNavController
 import androidx.navigation.fragment.navArgs
 import com.example.pick_dream.R
 import com.example.pick_dream.databinding.FragmentReviewBinding
 import com.example.pick_dream.model.Review
+import com.example.pick_dream.ui.mypage.review.ReviewRepository
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
-import java.util.*
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 
 class ReviewFragment : Fragment() {
 
@@ -52,9 +55,6 @@ class ReviewFragment : Fragment() {
         binding.btnClose.setOnClickListener { findNavController().popBackStack() }
     }
 
-    /**
-     * 별점 선택 UI를 초기화합니다.
-     */
     private fun setupStarRating() {
         val starViews = starIds.map { binding.root.findViewById<ImageView>(it) }
         starViews.forEachIndexed { index, imageView ->
@@ -66,10 +66,6 @@ class ReviewFragment : Fragment() {
         updateStars(starViews, selectedStars)
     }
 
-    /**
-     * 레이아웃 내 모든 CheckBox에 커스텀 drawable을 적용합니다.
-     * @param layout CheckBox들을 포함하는 ViewGroup
-     */
     private fun setupCheckBoxStyle(layout: ViewGroup) {
         for (i in 0 until layout.childCount) {
             val child = layout.getChildAt(i)
@@ -97,14 +93,17 @@ class ReviewFragment : Fragment() {
             return
         }
 
-        FirebaseFirestore.getInstance()
-            .collection("User").document(currentUser.uid).get()
-            .addOnSuccessListener { userDoc ->
+        lifecycleScope.launch {
+            try {
+                // 학번은 User 컬렉션에서 조회
+                val userDoc = FirebaseFirestore.getInstance()
+                    .collection("User").document(currentUser.uid).get().await()
+
                 val studentId = userDoc.getString("studentId") ?: userDoc.getString("userID")
                 if (studentId.isNullOrBlank()) {
                     Toast.makeText(context, "사용자 정보를 찾을 수 없습니다.", Toast.LENGTH_SHORT).show()
                     binding.btnSubmit.isEnabled = true
-                    return@addOnSuccessListener
+                    return@launch
                 }
 
                 val review = Review(
@@ -116,21 +115,21 @@ class ReviewFragment : Fragment() {
                     equipment = getCheckedTexts(binding.layoutEquip)
                 )
 
-                FirebaseFirestore.getInstance().collection("Reviews").add(review)
-                    .addOnSuccessListener {
-                        Log.d("ReviewFragment", "Review successfully submitted")
-                        findNavController().navigate(R.id.action_reviewFragment_to_reviewCompleteFragment)
-                    }
-                    .addOnFailureListener { e ->
-                        Log.e("ReviewFragment", "Error submitting review", e)
-                        Toast.makeText(context, "리뷰 제출에 실패했습니다.", Toast.LENGTH_SHORT).show()
-                        binding.btnSubmit.isEnabled = true
-                    }
-            }
-            .addOnFailureListener { e ->
-                Log.e("ReviewFragment", "Failed to fetch user info", e)
+                // 리뷰 추가를 Repository 로 위임
+                val success = ReviewRepository.addReview(review)
+                if (success) {
+                    Log.d("ReviewFragment", "Review successfully submitted")
+                    findNavController().navigate(R.id.action_reviewFragment_to_reviewCompleteFragment)
+                } else {
+                    Toast.makeText(context, "리뷰 제출에 실패했습니다.", Toast.LENGTH_SHORT).show()
+                    binding.btnSubmit.isEnabled = true
+                }
+            } catch (e: Exception) {
+                Log.e("ReviewFragment", "Failed to fetch user info or submit review", e)
+                Toast.makeText(context, "오류가 발생했습니다.", Toast.LENGTH_SHORT).show()
                 binding.btnSubmit.isEnabled = true
             }
+        }
     }
 
     private fun updateStars(starViews: List<ImageView>, selectedCount: Int) {

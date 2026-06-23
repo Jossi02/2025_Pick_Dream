@@ -1,19 +1,18 @@
 package com.example.pick_dream.ui.mypage.review
 
 import android.os.Bundle
-import android.util.Log
 import android.widget.ImageButton
+import android.widget.Toast
+import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.example.pick_dream.R
-import com.example.pick_dream.model.Review
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.Query
-
 
 class ReviewActivity : AppCompatActivity() {
+    private val viewModel: ReviewViewModel by viewModels()
+    private lateinit var adapter: ReviewAdapter
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_review)
@@ -22,36 +21,27 @@ class ReviewActivity : AppCompatActivity() {
         backButton.setOnClickListener {
             finish()
         }
+
         val recyclerView = findViewById<RecyclerView>(R.id.reviewRecyclerView)
-        val adapter = ReviewAdapter()
+        adapter = ReviewAdapter()
         recyclerView.layoutManager = LinearLayoutManager(this)
         recyclerView.adapter = adapter
 
-        val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return
-        val db = FirebaseFirestore.getInstance()
+        observeViewModel()
+        
+        // È­¸é ÁøÀÔ ½Ã ¸®ºä ·Îµå
+        viewModel.loadReviews()
+    }
 
-        db.collection("User").document(uid).get()
-            .addOnSuccessListener { document ->
-                val studentId = document.getString("studentId")
-                if (studentId.isNullOrBlank()) {
-                    Log.e("ReviewActivity", "Student ID not found")
-                    return@addOnSuccessListener
-                }
+    private fun observeViewModel() {
+        viewModel.reviews.observe(this) { reviewList ->
+            adapter.submitList(reviewList)
+        }
 
-                db.collection("Reviews")
-                    .whereEqualTo("userID", studentId)
-                    .orderBy("createdAt", Query.Direction.DESCENDING)  // ìµœì‹ ìˆœìœ¼ë¡œ ì •ë ¬
-                    .get()
-                    .addOnSuccessListener { querySnapshot ->
-                        val reviewList = querySnapshot.toObjects(Review::class.java)
-                        adapter.submitList(reviewList)
-                    }
-                    .addOnFailureListener {
-                        Log.e("ReviewActivity", "ë¦¬ë·° ë¡œë”© ì‹¤íŒ¨", it)
-                    }
+        viewModel.message.observe(this) { msg ->
+            if (msg.isNotBlank()) {
+                Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
             }
-            .addOnFailureListener {
-                Log.e("ReviewActivity", "í•™ë²ˆ ì¡°íšŒ ì‹¤íŒ¨", it)
-            }
+        }
     }
 }
