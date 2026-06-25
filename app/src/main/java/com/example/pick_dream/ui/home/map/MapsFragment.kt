@@ -139,11 +139,16 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
         try {
             map = googleMap
             places.forEach { place ->
-                val marker = map?.addMarker(
-                    MarkerOptions()
-                        .position(place.latLng)
-                        .title(place.name)
-                )
+                val markerOptions = MarkerOptions()
+                    .position(place.latLng)
+                    .title(place.name)
+                
+                val customIcon = bitmapDescriptorFromVector(requireContext(), R.drawable.ic_map_pin)
+                if (customIcon != null) {
+                    markerOptions.icon(customIcon)
+                }
+                
+                val marker = map?.addMarker(markerOptions)
                 marker?.tag = place
             }
             map?.setOnMarkerClickListener { marker ->
@@ -230,6 +235,15 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
                 .setPopUpTo(R.id.homeFragment, false)
                 .build()
         )
+    }
+
+    private fun bitmapDescriptorFromVector(context: android.content.Context, vectorResId: Int): com.google.android.gms.maps.model.BitmapDescriptor? {
+        val vectorDrawable = androidx.core.content.ContextCompat.getDrawable(context, vectorResId) ?: return null
+        vectorDrawable.setBounds(0, 0, vectorDrawable.intrinsicWidth, vectorDrawable.intrinsicHeight)
+        val bitmap = android.graphics.Bitmap.createBitmap(vectorDrawable.intrinsicWidth, vectorDrawable.intrinsicHeight, android.graphics.Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(bitmap)
+        vectorDrawable.draw(canvas)
+        return com.google.android.gms.maps.model.BitmapDescriptorFactory.fromBitmap(bitmap)
     }
 
     override fun onDestroyView() {
