@@ -30,6 +30,24 @@ object ReservationRepository {
     }
 
     /**
+     * 특정 방의 예약 목록을 가져옵니다.
+     */
+    suspend fun getReservationsByRoom(roomId: String): List<Reservation> {
+        return try {
+            val snapshot = db.collection("Reservations")
+                .whereEqualTo("roomID", roomId)
+                .get()
+                .await()
+
+            snapshot.documents.mapNotNull { doc ->
+                doc.toObject<Reservation>()?.apply { documentId = doc.id }
+            }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    /**
      * 예약 목록의 방 ID들을 기반으로 방 이미지를 가져옵니다.
      */
     suspend fun getRoomImages(roomIds: List<String>): Map<String, String?> {

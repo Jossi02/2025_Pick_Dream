@@ -97,15 +97,18 @@ class ManualReservationInputFragment : Fragment() {
     }
 
     private fun observeViewModel() {
-        reservationViewModel.submitResult.observe(viewLifecycleOwner) { isSuccess ->
-            if (isSuccess == null) return@observe
-
-            if (isSuccess) {
-                showSuccessDialog()
-            } else {
-                Toast.makeText(context, "예약 중 오류가 발생했습니다.", Toast.LENGTH_SHORT).show()
+        reservationViewModel.errorMessage.observe(viewLifecycleOwner) { msg ->
+            if (msg != null) {
+                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                reservationViewModel.clearSubmitResult() // clear error message
             }
-            reservationViewModel.clearSubmitResult()
+        }
+
+        reservationViewModel.submitResult.observe(viewLifecycleOwner) { isSuccess ->
+            if (isSuccess == true) {
+                showSuccessDialog()
+                reservationViewModel.clearSubmitResult()
+            }
         }
 
         reservationViewModel.isSubmitting.observe(viewLifecycleOwner) { isSubmitting ->
