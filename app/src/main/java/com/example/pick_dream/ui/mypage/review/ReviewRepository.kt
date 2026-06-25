@@ -26,6 +26,18 @@ object ReviewRepository {
     }
 
     /**
+     * 모든 리뷰 목록을 가져옵니다. (지도 평균 별점 계산용)
+     */
+    suspend fun getAllReviews(): List<Review> {
+        return try {
+            val snapshot = db.collection("Reviews").get().await()
+            snapshot.toObjects(Review::class.java)
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    /**
      * 새로운 리뷰를 Firestore에 추가합니다.
      */
     suspend fun addReview(review: Review): Boolean {

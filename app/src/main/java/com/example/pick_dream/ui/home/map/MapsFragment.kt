@@ -20,6 +20,10 @@ import com.google.android.gms.maps.OnMapReadyCallback
 import com.google.android.gms.maps.SupportMapFragment
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.MarkerOptions
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
+import com.example.pick_dream.ui.home.search.LectureRoomRepository
+import com.example.pick_dream.ui.mypage.review.ReviewRepository
 
 class MapsFragment : Fragment(), OnMapReadyCallback {
 
@@ -36,7 +40,7 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
         val latLng: LatLng
     )
 
-    private val places = listOf(
+    private var places = listOf(
         Place(
             name = "덕문관 (5강의동)",
             description = "예약 가능 강의실 : N개",
@@ -92,6 +96,45 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
                 showPlaceInfo(selectedPlace)
             }
         }
+        
+        loadDynamicMapData()
+    }
+
+    private fun loadDynamicMapData() {
+        viewLifecycleOwner.lifecycleScope.launch {
+            val allReviews = ReviewRepository.getAllReviews()
+            
+            LectureRoomRepository.lectureRoomsWithFavorites.observe(viewLifecycleOwner) { items ->
+                val allRooms = items.filterIsInstance<com.example.pick_dream.ui.home.search.ListItem.RoomItem>().map { it.lectureRoom }
+                
+                places = places.map { place ->
+                    val buildingName = place.name.substringBefore(" (")
+                    
+                    val roomsInBuilding = allRooms.filter { it.buildingName == buildingName }
+                    val availableCount = roomsInBuilding.count { it.isRentalAvailable }
+                    
+                    val roomIdsInBuilding = roomsInBuilding.map { it.id }
+                    val reviewsInBuilding = allReviews.filter { it.roomID in roomIdsInBuilding }
+                    val avgRating = if (reviewsInBuilding.isNotEmpty()) {
+                        reviewsInBuilding.map { it.rating }.average().toFloat()
+                    } else {
+                        0.0f
+                    }
+                    
+                    place.copy(
+                        description = "예약 가능 강의실 : ${availableCount}개",
+                        availableRooms = availableCount,
+                        rating = avgRating
+                    )
+                }
+                
+                val currentPlaceName = binding.placeName.text.toString()
+                val updatedPlace = places.find { it.name == currentPlaceName }
+                if (updatedPlace != null && binding.infoCard.visibility == View.VISIBLE) {
+                    showPlaceInfo(updatedPlace)
+                }
+            }
+        }
     }
 
     private fun setupMap() {
@@ -119,7 +162,8 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
                 marker?.tag = place
             }
             map?.setOnMarkerClickListener { marker ->
-                val place = marker.tag as? Place
+                val placeName = marker.title
+                val place = places.find { it.name == placeName }
                 if (place != null) {
                     showPlaceInfo(place)
                 }
@@ -150,6 +194,7 @@ class MapsFragment : Fragment(), OnMapReadyCallback {
         binding.placeName.text = place.name
         binding.placeDesc.text = place.description
         binding.placeRating.rating = place.rating
+        binding.placeRatingText.text = String.format(java.util.Locale.US, "%.1f/5.0", place.rating)
         binding.placeImage.setOnClickListener {
             ImagePreviewDialogFragment
                 .newInstance(ArrayList(place.imageResList))
