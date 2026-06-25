@@ -128,6 +128,17 @@ class ManualReservationInputFragment : Fragment() {
             return
         }
 
+        val roomName = arguments?.getString("roomName") ?: ""
+        val room = com.example.pick_dream.ui.home.search.LectureRoomRepository.lectureRoomsWithFavorites.value
+            ?.filterIsInstance<com.example.pick_dream.ui.home.search.ListItem.RoomItem>()
+            ?.find { it.lectureRoom.name == roomName }
+            ?.lectureRoom
+        
+        if (room != null && eventParticipants > room.capacity) {
+            Toast.makeText(context, "최대 수용 인원(${room.capacity}명)을 초과할 수 없습니다.", Toast.LENGTH_SHORT).show()
+            return
+        }
+
         val currentUser = auth.currentUser
         if (currentUser == null) {
             Toast.makeText(context, "로그인이 필요합니다.", Toast.LENGTH_SHORT).show()
