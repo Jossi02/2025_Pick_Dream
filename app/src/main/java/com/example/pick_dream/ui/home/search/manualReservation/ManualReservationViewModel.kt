@@ -26,6 +26,48 @@ class ManualReservationViewModel : ViewModel() {
     private val _errorMessage = MutableLiveData<String?>()
     val errorMessage: LiveData<String?> get() = _errorMessage
 
+    private val _existingReservations = MutableLiveData<List<Reservation>>()
+    val existingReservations: LiveData<List<Reservation>> get() = _existingReservations
+
+    fun loadExistingReservations(roomId: String) {
+        viewModelScope.launch {
+            _existingReservations.value = ReservationRepository.getReservationsByRoom(roomId)
+        }
+    }
+
+    fun isTimeOverlapping(year: Int, month: Int, day: Int, startHour: Int, startMinute: Int, endHour: Int, endMinute: Int): Boolean {
+        val existing = _existingReservations.value ?: return false
+        val format = java.text.SimpleDateFormat("yyyy년 M월 d일 a h시 m분 s초 'UTC+9'", java.util.Locale.KOREA)
+        
+        val ampmStart = if (startHour < 12) "오전" else "오후"
+        val h12Start = when { startHour == 0 -> 12; startHour > 12 -> startHour - 12; else -> startHour }
+        val startTimeStr = String.format("%d년 %d월 %d일 %s %d시 %d분 0초 UTC+9", year, month, day, ampmStart, h12Start, startMinute)
+
+        val ampmEnd = if (endHour < 12) "오전" else "오후"
+        val h12End = when { endHour == 0 -> 12; endHour > 12 -> endHour - 12; else -> endHour }
+        val endTimeStr = String.format("%d년 %d월 %d일 %s %d시 %d분 0초 UTC+9", year, month, day, ampmEnd, h12End, endMinute)
+
+        try {
+            val newStartMs = format.parse(startTimeStr)?.time ?: 0L
+            val newEndMs = format.parse(endTimeStr)?.time ?: 0L
+            
+            for (res in existing) {
+                if (res.status == "취소" || res.status == "거절") continue
+                if (res.startTime.isNullOrBlank() || res.endTime.isNullOrBlank()) continue
+                
+                val existingStartMs = format.parse(res.startTime)?.time ?: 0L
+                val existingEndMs = format.parse(res.endTime)?.time ?: 0L
+                
+                if (newStartMs < existingEndMs && newEndMs > existingStartMs) {
+                    return true
+                }
+            }
+        } catch (e: Exception) {
+            return false
+        }
+        return false
+    }
+
     fun makeReservation(reservation: Reservation) {
         _isSubmitting.value = true
         viewModelScope.launch {

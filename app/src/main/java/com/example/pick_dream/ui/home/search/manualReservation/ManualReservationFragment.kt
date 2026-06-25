@@ -73,20 +73,41 @@ class ManualReservationFragment : Fragment() {
             val isDateSelected = tvDateSelectTitle.text != "날짜 선택"
             val isTimeSelected = tvTimeSelect.text != "시간 선택"
 
-            btnNext.isEnabled = isDateSelected && isTimeSelected
+            var isOverlapping = false
+            if (isDateSelected && isTimeSelected && selectedDay != null) {
+                isOverlapping = reservationViewModel.isTimeOverlapping(
+                    selectedDay!!.year,
+                    selectedDay!!.month + 1,
+                    selectedDay!!.day,
+                    spinnerStartHour.selectedItem as Int,
+                    spinnerStartMinute.selectedItem as Int,
+                    spinnerEndHour.selectedItem as Int,
+                    spinnerEndMinute.selectedItem as Int
+                )
+            }
+
+            val isValid = isDateSelected && isTimeSelected && !isOverlapping
+            
+            btnNext.isEnabled = isValid
+            btnNext.text = if (isOverlapping) "이미 예약된 시간입니다" else "다음"
+
             btnNext.setBackgroundColor(
-                if (isDateSelected && isTimeSelected)
+                if (isValid)
                     ContextCompat.getColor(requireContext(), R.color.primary_400)
                 else
                     ContextCompat.getColor(requireContext(), R.color.primary_050)
             )
             btnNext.setTextColor(
-                if (isDateSelected && isTimeSelected)
+                if (isValid)
                     ContextCompat.getColor(requireContext(), R.color.white)
                 else
                     ContextCompat.getColor(requireContext(), R.color.primary_400)
             )
             btnNext.elevation = 0f
+        }
+
+        reservationViewModel.existingReservations.observe(viewLifecycleOwner) {
+            updateButtonState()
         }
 
         fun updateTimeText() {
@@ -120,6 +141,8 @@ class ManualReservationFragment : Fragment() {
         val roomId = Regex("\\d+").find(roomName)?.value ?: ""
         tvBuilding.text = building
         tvRoomName.text = roomName
+        
+        reservationViewModel.loadExistingReservations(roomId)
 
         btnNext.setOnClickListener {
             val bundle = Bundle().apply {

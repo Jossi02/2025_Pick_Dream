@@ -98,7 +98,7 @@ class LectureRoomDetailFragment : Fragment() {
             val room = viewModel.roomDetail.value
             if (room != null) {
                 val action = LectureRoomDetailFragmentDirections.actionLectureRoomDetailFragmentToManualReservationFragment(
-                    building = "${room.buildingName} (${room.buildingDetail})",
+                    building = room.displayBuildingName,
                     roomName = room.name
                 )
                 findNavController().navigate(action)
