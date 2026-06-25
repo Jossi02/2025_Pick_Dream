@@ -3,14 +3,15 @@
     xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:fitsSystemWindows="true"
     android:background="#F8F9FE">
 
     <!-- 상단 타이틀 -->
     <RelativeLayout
         android:layout_width="match_parent"
-        android:layout_height="110dp"
+        android:layout_height="80dp"
         android:background="#3C5ABD"
-        android:paddingTop="30dp"
+        android:paddingTop="0dp"
         android:paddingHorizontal="16dp">
 
         <TextView
@@ -39,7 +40,7 @@
     <ScrollView
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:layout_marginTop="110dp"
+        android:layout_marginTop="80dp"
         android:fillViewport="true">
 
         <LinearLayout
