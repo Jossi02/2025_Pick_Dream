@@ -71,12 +71,14 @@ def find_room(room_identifier):
     return None, None
 
 
-def has_conflict(field: str, value: str, start, end):
+def has_conflict(field: str, value: str, start, end, exclude_id: str = None):
     conflicts = db.collection("Reservations") \
         .where("startTimestamp", "<", end) \
         .where("endTimestamp", ">", start) \
         .where(field, "==", value).stream()
-    logging.info(f"[has_conflict] field={field}, value={value}")
+    logging.info(f"[has_conflict] field={field}, value={value}, exclude_id={exclude_id}")
+    if exclude_id:
+        return any(True for doc in conflicts if doc.id != exclude_id)
     return any(True for _ in conflicts)
 
 def handle_query_equipment(query, userID):
@@ -259,6 +261,81 @@ def handle_cancel_reservation(query, userID):
     except Exception as e:
         logging.exception("[handle_cancel_reservation] 예외 발생")
         return https_fn.Response("예약 취소 중 오류가 발생했어요. 로그를 확인해주세요.", status=500)
+
+def handle_change_reservation(query, userID):
+    try:
+        target_room_id, target_room_data = find_room(query.get("room"))
+        logging.info(f"[handle_change_reservation] target_room_id={target_room_id}, userID={userID}")
+
+        col = db.collection("Reservations").where("userID", "==", userID)
+        if target_room_id:
+            col = col.where("roomID", "==", target_room_id)
+        
+        docs_query = col.order_by("startTimestamp", direction=firestore.Query.DESCENDING).limit(1)
+        docs = list(docs_query.stream())
+
+        if not docs:
+            return https_fn.Response("변경할 예약이 없습니다.", status=404)
+
+        doc_to_update = docs[0]
+        res_data = doc_to_update.to_dict()
+        res_id = doc_to_update.id
+
+        new_duration = query.get("duration")
+        new_participants = query.get("eventParticipants")
+        new_start_time = query.get("startTime")
+
+        start = res_data.get("startTimestamp")
+        end = res_data.get("endTimestamp")
+        duration_hours = int((end - start).total_seconds() / 3600) if end and start else 2
+
+        if new_start_time:
+            try:
+                start = datetime.fromisoformat(new_start_time)
+                if start.tzinfo is None:
+                    start = start.replace(tzinfo=timezone.utc).astimezone(KST)
+            except:
+                pass
+
+        if new_duration:
+            duration_hours = int(new_duration)
+
+        if duration_hours < 1 or duration_hours > 6:
+            return https_fn.Response("예약 시간은 최소 1시간, 최대 6시간까지만 가능합니다.", status=400)
+
+        end = start + timedelta(hours=duration_hours)
+        now = datetime.now(KST)
+        if start < now:
+            return https_fn.Response("예약 시작 시간은 현재 시간 이후여야 해요.", status=400)
+
+        if has_conflict("userID", userID, start, end, exclude_id=res_id):
+            return https_fn.Response("해당 시간에 이미 예약한 다른 강의실이 있어요.", status=409)
+        if has_conflict("roomID", res_data.get("roomID"), start, end, exclude_id=res_id):
+            return https_fn.Response("해당 시간에 이미 강의실이 예약되어 있어요.", status=409)
+
+        update_data = {
+            "startTimestamp": start,
+            "endTimestamp": end,
+            "startTime": start.strftime("%Y년 %-m월 %-d일 %p %-I시 %M분 %S초 UTC+9").replace("AM", "오전").replace("PM", "오후"),
+            "endTime": end.strftime("%Y년 %-m월 %-d일 %p %-I시 %M분 %S초 UTC+9").replace("AM", "오전").replace("PM", "오후"),
+        }
+
+        if new_participants:
+            participants_str = str(new_participants).strip()
+            numeric_part = re.search(r'\d+', participants_str)
+            if numeric_part:
+                update_data["eventParticipants"] = int(numeric_part.group())
+
+        db.collection("Reservations").document(res_id).update(update_data)
+        
+        _, room_data = find_room(res_data.get("roomID"))
+        room_name = room_data.get("name", res_data.get("roomID")) if room_data else res_data.get("roomID")
+        
+        return https_fn.Response(f"{room_name} 예약이 성공적으로 변경되었습니다 ✅", status=200)
+
+    except Exception as e:
+        logging.exception("[handle_change_reservation] 예외 발생")
+        return https_fn.Response("예약 변경 중 오류가 발생했어요. 로그를 확인해주세요.", status=500)
 
 def handle_latest_notice(query, userID):
     docs = db.collection("Notices").order_by("createdAt", direction=firestore.Query.DESCENDING).limit(1).get()
@@ -481,6 +558,7 @@ def handle_my_reservations(query, userID):
 handlers = {
     "query_equipment": handle_query_equipment,
     "reserve": handle_reserve,
+    "change_reservation": handle_change_reservation,
     "cancel_reservation": handle_cancel_reservation,
     "latest_notice": handle_latest_notice,
     "my_reviews": handle_my_reviews,
@@ -519,10 +597,11 @@ def ai_assistant(req: https_fn.Request) -> https_fn.Response:
             user_doc = user_doc_ref.get()
             if user_doc.exists:
                 user_data = user_doc.to_dict()
-                userID = user_data.get("studentId") # 학번을 userID로 사용
-                if not userID:
+                raw_student_id = user_data.get("studentId")
+                if not raw_student_id:
                     logging.error(f"studentId not found for uid: {uid}")
                     return https_fn.Response("사용자 정보에서 학번을 찾을 수 없습니다.", status=404)
+                userID = str(raw_student_id) # 학번을 문자열로 변환하여 userID로 사용 (Firestore 오류 방지)
             else:
                 logging.error(f"User document not found for uid: {uid}")
                 return https_fn.Response("사용자 정보를 찾을 수 없습니다.", status=404)
@@ -589,6 +668,15 @@ def ai_assistant(req: https_fn.Request) -> https_fn.Response:
 "action": "cancel_reservation",
 "room": "5104",
 "userID": "{userID}"
+}}
+
+4. 예약 변경
+{{
+"action": "change_reservation",
+"room": "5104",
+"startTime": "{now_kst.isoformat()}",
+"duration": 3,
+"eventParticipants": "8명"
 }}
 
 4. 최신 공지
@@ -673,7 +761,7 @@ def ai_assistant(req: https_fn.Request) -> https_fn.Response:
         # Gemini 모델 호출
         try:
             response = genai_client.models.generate_content(
-                model='gemini-2.5-flash',
+                model='gemini-2.5-flash-lite',
                 contents=user_input,
                 config=types.GenerateContentConfig(
                     system_instruction=system_prompt
