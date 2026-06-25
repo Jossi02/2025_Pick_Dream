@@ -30,7 +30,7 @@
             android:layout_gravity="center"
             android:text="AI 예약"
             android:textColor="@android:color/white"
-            android:textSize="28sp"
+            android:textSize="24sp"
             android:textStyle="bold"/>
     </FrameLayout>
 

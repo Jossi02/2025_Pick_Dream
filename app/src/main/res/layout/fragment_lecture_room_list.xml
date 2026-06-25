@@ -36,7 +36,7 @@
             android:text="대여 강의실 조회"
             android:layout_gravity="center"
             android:textColor="#FFFFFF"
-            android:textSize="28sp"
+            android:textSize="24sp"
             android:textStyle="bold"
             app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintBottom_toBottomOf="parent"

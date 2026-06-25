@@ -32,7 +32,7 @@
             android:layout_centerInParent="true"
             android:text="대여하기"
             android:textColor="@android:color/white"
-            android:textSize="28sp"
+            android:textSize="24sp"
             android:textStyle="bold" />
     </RelativeLayout>
 
