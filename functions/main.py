@@ -17,9 +17,9 @@ BASE_DIR = Path(__file__).resolve().parent
 initialize_app()
 
 db = firestore.client()
-# Vertex AI 모드를 사용하도록 클라이언트 설정 (인증 오류 방지)
-project_id = os.environ.get("GCLOUD_PROJECT", "pickdreamtest")
-genai_client = genai.Client(vertexai=True, project=project_id, location="us-central1")
+# API Key 기반 클라이언트 설정 (Vertex AI 자동 전환 방지)
+api_key = os.environ.get("GEMINI_API_KEY")
+genai_client = genai.Client(api_key=api_key, vertexai=False)
 
 KST = timezone(timedelta(hours=9))
 
@@ -650,6 +650,16 @@ handlers = {
     "my_reservations": handle_my_reservations
 }
 
+FAQ_RULES = """
+[강의실 이용 수칙 및 안내]
+- 예약 가능 시간: 오전 9시부터 오후 10시까지 예약 가능합니다. (밤 10시 이후 예약 불가)
+- 예약 단위: 최소 1시간부터 최대 6시간까지 예약 가능합니다.
+- 취소 규정: 예약 시작 1시간 전까지 취소 가능하며, 노쇼(No-show) 시 1개월간 예약이 정지됩니다.
+- 프로젝터 사용법: 프로젝터 리모컨은 각 강의실 앞 교탁 서랍에 비치되어 있습니다.
+- 음식물 반입: 생수 외의 음료나 음식물 반입은 엄격히 금지됩니다.
+- 최소 예약 인원: 최소 1명 이상이어야 예약이 가능합니다.
+"""
+
 @https_fn.on_request()
 def ai_assistant(req: https_fn.Request) -> https_fn.Response:
     try:
@@ -678,280 +688,140 @@ def ai_assistant(req: https_fn.Request) -> https_fn.Response:
                 user_data = user_doc.to_dict()
                 raw_student_id = user_data.get("studentId")
                 if not raw_student_id:
-                    logging.error(f"studentId not found for uid: {uid}")
                     return https_fn.Response("사용자 정보에서 학번을 찾을 수 없습니다.", status=404)
-                userID = str(raw_student_id) # 학번을 문자열로 변환하여 userID로 사용 (Firestore 오류 방지)
+                userID = str(raw_student_id)
             else:
-                logging.error(f"User document not found for uid: {uid}")
                 return https_fn.Response("사용자 정보를 찾을 수 없습니다.", status=404)
         except Exception as e:
-            logging.exception("Failed to fetch user data from Firestore.")
             return https_fn.Response("사용자 정보 조회 중 오류가 발생했습니다.", status=500)
 
-        # ✅ 단순 반응 처리 (GPT 호출 전)
-        positive_keywords = ["응", "ㅇㅇ", "좋아", "그래", "예약해줘", "해줘", "할래"]
-        if user_input.strip() in positive_keywords:
-            pending = db.collection("PendingReservations").document(userID).get()
-            if pending.exists:
-                logging.info("[단순 반응에 의한 예약 진행]")
-                pending_data = pending.to_dict()
-                query = {
-                    "action": "reserve",
-                    "userID": userID,
-                    "room": pending_data.get("room"),
-                    "startTime": pending_data.get("startTime"),
-                    "duration": pending_data.get("duration"),
-                    "eventName": pending_data.get("eventName", "추천 예약"),
-                    "eventParticipants": pending_data.get("eventParticipants")
-                }
-                return handle_reserve(query, userID)
-            else:
-                return https_fn.Response("추천된 강의실이 없어요. 먼저 추천을 받아주세요 😊", status=400)
+        # ----------------------------------------------------
+        # 1. Chat History 불러오기
+        # ----------------------------------------------------
+        history_ref = db.collection("ChatHistory").document(userID)
+        history_doc = history_ref.get()
+        stored_messages = []
+        if history_doc.exists:
+            stored_messages = history_doc.to_dict().get("messages", [])[-10:]
 
-        # 시스템 프롬프트
+        chat_history = []
+        for msg in stored_messages:
+            chat_history.append({"role": msg["role"], "parts": [{"text": msg["text"]}]})
+
+        # ----------------------------------------------------
+        # 2. Function Calling 도구(Tools) 정의
+        # ----------------------------------------------------
+        tools = [
+            types.Tool(
+                function_declarations=[
+                    types.FunctionDeclaration(name="query_equipment", description="특정 강의실의 특정 기자재 유무 확인", parameters=types.Schema(type="OBJECT", properties={"room": types.Schema(type="STRING"), "item": types.Schema(type="STRING")}, required=["room", "item"])),
+                    types.FunctionDeclaration(name="reserve", description="특정 강의실 예약. 사용자가 강의실 이름, 시간, 인원을 모두 명시적으로 말했을 때 호출.", parameters=types.Schema(type="OBJECT", properties={"room": types.Schema(type="STRING"), "startTime": types.Schema(type="STRING"), "duration": types.Schema(type="INTEGER"), "eventParticipants": types.Schema(type="INTEGER")}, required=["room", "startTime", "eventParticipants"])),
+                    types.FunctionDeclaration(name="cancel_reservation", description="예약 취소", parameters=types.Schema(type="OBJECT", properties={"room": types.Schema(type="STRING")}, required=["room"])),
+                    types.FunctionDeclaration(name="change_reservation", description="예약 변경", parameters=types.Schema(type="OBJECT", properties={"room": types.Schema(type="STRING"), "startTime": types.Schema(type="STRING"), "duration": types.Schema(type="INTEGER"), "eventParticipants": types.Schema(type="INTEGER")}, required=["room"])),
+                    types.FunctionDeclaration(name="latest_notice", description="최신 공지 확인", parameters=types.Schema(type="OBJECT", properties={})),
+                    types.FunctionDeclaration(name="my_reviews", description="내가 쓴 리뷰 확인", parameters=types.Schema(type="OBJECT", properties={})),
+                    types.FunctionDeclaration(name="recommend_room", description="조건에 맞는 빈 강의실 추천/검색. 예약 의사가 있으나 조건이 다 채워지지 않았을 때도 호출.", parameters=types.Schema(type="OBJECT", properties={"keywords": types.Schema(type="ARRAY", items=types.Schema(type="STRING")), "afterTime": types.Schema(type="STRING")})),
+                    types.FunctionDeclaration(name="review_summary", description="특정 강의실 리뷰 요약", parameters=types.Schema(type="OBJECT", properties={"room": types.Schema(type="STRING")}, required=["room"])),
+                    types.FunctionDeclaration(name="list_rooms", description="전체 강의실 조회", parameters=types.Schema(type="OBJECT", properties={})),
+                    types.FunctionDeclaration(name="list_rooms_by_building", description="특정 건물 강의실 조회 (예: 5강의동)", parameters=types.Schema(type="OBJECT", properties={"building": types.Schema(type="STRING")}, required=["building"])),
+                    types.FunctionDeclaration(name="list_rooms_by_equipment", description="특정 기자재 있는 강의실 조회", parameters=types.Schema(type="OBJECT", properties={"item": types.Schema(type="STRING")}, required=["item"])),
+                    types.FunctionDeclaration(name="room_availability", description="특정 강의실의 오늘 예약 내역 확인", parameters=types.Schema(type="OBJECT", properties={"room": types.Schema(type="STRING")}, required=["room"])),
+                    types.FunctionDeclaration(name="my_reservations", description="내 예약 내역 확인", parameters=types.Schema(type="OBJECT", properties={})),
+                    types.FunctionDeclaration(name="get_facility_rules", description="강의실 이용 수칙, 취소 규정, 기자재 사용법 등을 조회", parameters=types.Schema(type="OBJECT", properties={"query": types.Schema(type="STRING")}, required=["query"])),
+                ]
+            )
+        ]
+
         now_kst = datetime.now(KST)
-        system_prompt = f"""너는 Firestore 기반 강의실 예약 도우미야. 사용자의 한국어 문장을 먼저 자연스럽게 오타 없이 교정하고, 그 다음 아래 JSON 명령 중 하나로 변환해.
+        system_prompt = f"""당신은 세종대학교 대양AI센터의 강의실 예약 및 안내를 돕는 AI 비서 '세종이'입니다.
+항상 존댓말을 사용하고 이모지(😊)를 적절히 사용해 친절하게 응답하세요.
 
-오늘 날짜와 현재 시간은 {now_kst.strftime('%Y-%m-%d %H:%M:%S KST')}이야. 이 정보를 바탕으로 '내일', '모레', '오후 2시' 같은 상대적인 시간 데이터를 정확한 ISO 8601 형식으로 변환해줘.
-주의: 모든 시간 데이터는 반드시 KST(한국시간) 기준의 ISO-8601 형식(YYYY-MM-DDTHH:MM:SS+09:00)으로 작성해야 해. (예: 2025-03-15T14:00:00+09:00)
-💡 매우 중요한 규칙: 사용자가 말한 시간이 현재 시간보다 과거라면, 특별한 날짜 언급이 없더라도 무조건 "내일"의 시간으로 간주하고 내일 날짜로 변환하세요.
+오늘 날짜와 현재 시간은 {now_kst.strftime('%Y-%m-%d %H:%M:%S KST')}입니다.
+이를 기준으로 '내일', '모레', '오후 2시' 등의 시간을 정확한 ISO 8601 형식(예: 2025-03-15T14:00:00)으로 변환해 도구 파라미터로 넘기세요.
 
-반드시 아래 형식을 따르고, **JSON만 반환**해야 해.
-설명, 문장, 주석 등은 출력하지 마. 오직 JSON 한 개만 반환해.
-
-⚠️ 중요: 다음과 같은 응답은 절대 하지 마세요:
-- "알겠습니다. 아래 JSON을 참고하세요." 같은 자연어 포함
-- JSON 앞뒤에 설명 추가
-- JSON 블록이 아닌 텍스트만 반환
-
-⚠️ 강력한 규칙:
-- 사용자가 예약을 요청하더라도, **특정 강의실 이름(예: 101호)을 명시하지 않았다면 무조건 `recommend_room` 액션을 사용**하세요. 빈 방을 먼저 찾아야 하기 때문입니다.
-
----
-
-### 명령 유형과 JSON 구조
-
-1. 기자재 확인
-{{
-"action": "query_equipment",
-"room": "5104",
-"item": "TV"
-}}
-
-2. 강의실 예약
-{{
-"action": "reserve",
-"room": "5104",
-"startTime": "{now_kst.isoformat()}",
-"duration": 2,
-"eventParticipants": "6명",
-"userID": "{userID}"
-}}
-
-3. 예약 취소
-{{
-"action": "cancel_reservation",
-"room": "5104",
-"userID": "{userID}"
-}}
-
-4. 예약 변경
-{{
-"action": "change_reservation",
-"room": "5104",
-"startTime": "{now_kst.isoformat()}",
-"duration": 3,
-"eventParticipants": "8명"
-}}
-
-4. 최신 공지
-{{ "action": "latest_notice" }}
-
-5. 내가 쓴 리뷰
-{{
-"action": "my_reviews",
-"userID": "{userID}"
-}}
-
-6. 강의실 추천
-{{
-"action": "recommend_room",
-"keywords": ["6명", "TV", "마이크"],
-"startTime": "{now_kst.isoformat()}"
-}}
-
-7. 강의실 평가 요청
-{{
-"action": "review_summary",
-"room": "5104"
-}}
-
-8. 전체 강의실 조회
-{{
-"action": "list_rooms"
-}}
-
-9. 동별 강의실 조회
-{{
-"action": "list_rooms_by_building",
-"building": "5강의동"
-}}
-
-10. 기자재별 강의실 조회
-{{
-"action": "list_rooms_by_equipment",
-"item": "마이크"
-}}
-
-11. 특정 강의실 예약 확인
-{{
-"action": "room_availability",
-"room": "5104"
-}}
-
-12. 내 예약 확인
-{{
-"action": "my_reservations"
-}}
-
----
-
-### 추가 응답 예약 예외 규칙
-
-사용자의 입력이 긍정 반응("응", "좋아요", "ㅇㅇ", "그래", "예약해줘" 등) **단순 반응**일 경우:
-
-- **최근에 추천된 강의실이 존재할 때만** 아래 JSON을 반환해야 해:
-
-{{
-"action": "reserve",
-"userID": "{userID}"
-}}
-
-- 추천된 강의실이 없다면 아무것도 반환하지 마.
-
----
-
-### recommend_room의 keywords 규칙
-
-- 무조건 문자열 리스트(List[str])로 작성
-- 키워드는 다음 중 포함 가능:
-  - 인원수: "6명", "8명" 등
-  - 기자재: "TV", "마이크", "전자칠판", "빔프로젝터"
-  - 시간: "지금"
-
-시간 조건이 있는 경우 다음 형식을 따름:
-- `"afterTime": "YYYY-MM-DDTHH:MM:SS"` 형태로 특정 시점 이후 가능한 강의실 추천 가능
+**중요 지침:**
+- 단순 대화는 텍스트로 자연스럽게 답변하세요.
+- 예약, 검색, 정보 조회가 필요하면 반드시 적절한 도구(Function)를 호출하세요.
+- 예약을 확정(reserve)하려면 '강의실 이름', '시작 시간', '인원수'가 모두 필요합니다. 하나라도 부족하면 recommend_room을 호출하거나 직접 질문하세요.
+- 절대 임의의 강의실이나 시간을 지어내지 마세요.
 """
 
-        # Gemini 모델 호출
+        # ----------------------------------------------------
+        # 3. LLM 호출
+        # ----------------------------------------------------
+        contents = chat_history + [{"role": "user", "parts": [{"text": user_input}]}]
+
         try:
             response = genai_client.models.generate_content(
                 model='gemini-2.5-flash-lite',
-                contents=user_input,
+                contents=contents,
                 config=types.GenerateContentConfig(
-                    system_instruction=system_prompt
+                    system_instruction=system_prompt,
+                    tools=tools,
+                    temperature=0.1
                 )
             )
-            gpt_response_text = response.text.strip()
-            # 마크다운 코드 블록 제거 방어 코드
-            if gpt_response_text.startswith("```json"):
-                gpt_response_text = gpt_response_text.removeprefix("```json").removesuffix("```").strip()
-            elif gpt_response_text.startswith("```"):
-                gpt_response_text = gpt_response_text.removeprefix("```").removesuffix("```").strip()
         except Exception as e:
             logging.exception(f"[Gemini 호출 실패]: {e}")
             return https_fn.Response("AI 서버가 혼잡하여 요청을 처리할 수 없어요.", status=500)
 
-        logging.info(f"[user_input]: {user_input}")
-        logging.info(f"[gemini_response_text]: {gpt_response_text}")
+        bot_text = ""
+        is_history_clear = False
 
-        if not gpt_response_text.startswith("{") or not gpt_response_text.endswith("}"):
-            logging.warning(f"[GPT 응답 JSON 아님]: {gpt_response_text}")
-
-            if any(k in user_input for k in ["추천", "추천해줘", "예약까지", "추천하고 예약"]):
-                logging.info("[추천 문장 fallback 처리 진행]")
-                _ = handle_recommend_room({"keywords": []}, userID)
-                pending = db.collection("PendingReservations").document(userID).get()
-                if pending.exists:
-                    pending_data = pending.to_dict()
-                    reserve_query = {
-                        "action": "reserve",
-                        "userID": userID,
-                        "room": pending_data.get("room"),
-                        "startTime": pending_data.get("startTime"),
-                        "duration": pending_data.get("duration"),
-                        "eventName": pending_data.get("eventName", "추천 예약"),
-                        "eventParticipants": pending_data.get("eventParticipants")
-                    }
-                    return handle_reserve(reserve_query, userID)
-
-            pending = db.collection("PendingReservations").document(userID).get()
-            if pending.exists:
-                logging.info("[예약 단순 확인] GPT 없이 Pending 기반 예약 진행")
-                pending_data = pending.to_dict()
-                query = {
-                    "action": "reserve",
-                    "userID": userID,
-                    "room": pending_data.get("room"),
-                    "startTime": pending_data.get("startTime"),
-                    "duration": pending_data.get("duration"),
-                    "eventName": pending_data.get("eventName", "추천 예약"),
-                    "eventParticipants": pending_data.get("eventParticipants")
-                }
-                return handle_reserve(query, userID)
-
-            return https_fn.Response("죄송해요, 이해하지 못했어요. 예: '5104호 예약해줘'처럼 다시 말해 주세요 😊", status=400)
-
-        try:
-            query = json.loads(gpt_response_text)
-            logging.info(f"[query]: {query}")
-        except json.JSONDecodeError:
-            logging.warning(f"[GPT JSON 파싱 실패]: {gpt_response_text}")
-            return https_fn.Response("죄송해요, 응답 처리에 실패했어요. 다시 시도해 주세요.", status=400)
-
-        action = query.get("action")
-        if not action or action not in handlers:
-            return https_fn.Response("죄송해요, 요청을 이해하지 못했어요 😥", status=400)
-
-        # 방이 지정되지 않은 'reserve' 요청을 'recommend_room'으로 자동 전환
-        if action == "reserve" and not query.get("room"):
-            pending = db.collection("PendingReservations").document(userID).get()
-            if not pending.exists:
-                logging.info("[방 없는 예약 요청 -> 추천으로 자동 전환]")
-                action = "recommend_room"
-                query["keywords"] = []
-                if query.get("eventParticipants"):
-                    query["keywords"].append(str(query["eventParticipants"]))
-
-        if "room" in query and query["room"]:
-            room_id, _ = find_room(query["room"])
-            if room_id:
-                query["room"] = room_id
-
-        if action == "recommend_room":
-            response = handle_recommend_room(query, userID)
-            pending = db.collection("PendingReservations").document(userID).get()
-            if pending.exists:
-                pending_data = pending.to_dict() or {}
-                has_all_fields = pending_data.get("room") and pending_data.get("startTime") and pending_data.get("eventParticipants")
+        # ----------------------------------------------------
+        # 4. 도구 호출(Function Calls) 처리
+        # ----------------------------------------------------
+        if response.function_calls:
+            fc = response.function_calls[0]
+            action = fc.name
+            logging.info(f"[Function Call] {action} args: {fc.args}")
+            
+            if action == "get_facility_rules":
+                bot_text = f"알려드릴게요! 🧐\n\n{FAQ_RULES}\n\n도움이 더 필요하신가요? 😊"
+            else:
+                query = {"action": action}
+                for k, v in fc.args.items():
+                    query[k] = v
                 
-                is_simple_answer = len(user_input.strip().split()) <= 2 and query.get("keywords")
-                is_reserve_intent = any(kw in user_input for kw in ["예약까지", "예약해줘", "바로 예약", "바로해줘", "예약할게", "할게", "사용할게"])
-                
-                if has_all_fields and (is_simple_answer or is_reserve_intent):
-                    reserve_query = {
-                        "action": "reserve",
-                        "userID": userID,
-                        "room": pending_data.get("room"),
-                        "startTime": pending_data.get("startTime"),
-                        "duration": pending_data.get("duration", 2),
-                        "eventName": pending_data.get("eventName", "추천 예약"),
-                        "eventParticipants": pending_data.get("eventParticipants")
-                    }
-                    return handle_reserve(reserve_query, userID)
-            return response
+                if "room" in query and query["room"]:
+                    room_id, _ = find_room(query["room"])
+                    if room_id:
+                        query["room"] = room_id
 
-        return handlers[action](query, userID)
+                if action == "recommend_room":
+                    query["keywords"] = list(query.get("keywords", []))
+                elif action in ["reserve", "change_reservation"]:
+                    if query.get("eventParticipants"):
+                        query["eventParticipants"] = str(query["eventParticipants"])
+                    if query.get("duration"):
+                        query["duration"] = int(query["duration"])
+                        
+                if action in handlers:
+                    res = handlers[action](query, userID)
+                    bot_text = res.data.decode('utf-8') if hasattr(res, 'data') else str(res)
+                    
+                    if action == "reserve" and "예약이 완료되었습니다" in bot_text:
+                        is_history_clear = True
+                    elif action == "cancel_reservation" and "취소되었습니다" in bot_text:
+                        is_history_clear = True
+                else:
+                    bot_text = "지원하지 않는 기능을 호출했어요."
+        else:
+            bot_text = response.text.strip()
+
+        # ----------------------------------------------------
+        # 5. Chat History 업데이트
+        # ----------------------------------------------------
+        if is_history_clear:
+            history_ref.delete()
+        else:
+            new_messages = [
+                {"role": "user", "text": user_input},
+                {"role": "model", "text": bot_text}
+            ]
+            history_ref.set({"messages": firestore.ArrayUnion(new_messages)}, merge=True)
+
+        return https_fn.Response(bot_text, status=200)
 
     except Exception as e:
         logging.exception("예외 발생:")
