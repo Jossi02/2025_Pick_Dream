@@ -434,9 +434,9 @@ def handle_recommend_room(query, userID):
         None
     )
 
-    # 🔍 시간 기준: "지금" 또는 명시적 afterTime
+    # 🔍 시간 기준: "지금" 또는 명시적 예약 시작 시간
     require_available_now = "지금" in keywords
-    after_time_str = query.get("afterTime")
+    after_time_str = query.get("afterTime") or query.get("startTime")
     base_time = now
 
     if after_time_str:
@@ -521,12 +521,19 @@ def handle_recommend_room(query, userID):
         response += f'\n📝 최근 후기: "{latest_comment}"'
     if avg is not None:
         response += f"\n⭐ 평균 평점: {avg}점\n📊 긍정 {pos_rate}%, 부정 {neg_rate}%"
+        
+    response += "\n\n이 강의실로 예약하시겠어요?"
+
+    if after_time_str:
+        pending_start_time = base_time.astimezone(KST).isoformat()
+    else:
+        pending_start_time = (base_time + timedelta(minutes=10)).astimezone(KST).isoformat()
 
     pending_data = {
         "room": room_id,
-        "startTime": (base_time + timedelta(minutes=10)).astimezone(KST).isoformat(),
-        "duration": 2,
-        "eventName": "추천 예약"
+        "startTime": pending_start_time,
+        "duration": query.get("duration", 2),
+        "eventName": query.get("eventName", "추천 예약")
     }
     if person_count is not None:
         pending_data["eventParticipants"] = f"{person_count}명"
@@ -864,6 +871,16 @@ def ai_assistant(req: https_fn.Request) -> https_fn.Response:
         action = query.get("action")
         if not action or action not in handlers:
             return https_fn.Response("죄송해요, 요청을 이해하지 못했어요 😥", status=400)
+
+        # 방이 지정되지 않은 'reserve' 요청을 'recommend_room'으로 자동 전환
+        if action == "reserve" and not query.get("room"):
+            pending = db.collection("PendingReservations").document(userID).get()
+            if not pending.exists:
+                logging.info("[방 없는 예약 요청 -> 추천으로 자동 전환]")
+                action = "recommend_room"
+                query["keywords"] = []
+                if query.get("eventParticipants"):
+                    query["keywords"].append(str(query["eventParticipants"]))
 
         if "room" in query and query["room"]:
             room_id, _ = find_room(query["room"])
