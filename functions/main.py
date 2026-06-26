@@ -667,7 +667,8 @@ def ai_assistant(req: https_fn.Request) -> https_fn.Response:
                     "room": pending_data.get("room"),
                     "startTime": pending_data.get("startTime"),
                     "duration": pending_data.get("duration"),
-                    "eventName": pending_data.get("eventName", "추천 예약")
+                    "eventName": pending_data.get("eventName", "추천 예약"),
+                    "eventParticipants": pending_data.get("eventParticipants")
                 }
                 return handle_reserve(query, userID)
             else:
@@ -687,6 +688,9 @@ def ai_assistant(req: https_fn.Request) -> https_fn.Response:
 - "알겠습니다. 아래 JSON을 참고하세요." 같은 자연어 포함
 - JSON 앞뒤에 설명 추가
 - JSON 블록이 아닌 텍스트만 반환
+
+⚠️ 강력한 규칙:
+- 사용자가 예약을 요청하더라도, **특정 강의실 이름(예: 101호)을 명시하지 않았다면 무조건 `recommend_room` 액션을 사용**하세요. 빈 방을 먼저 찾아야 하기 때문입니다.
 
 ---
 
@@ -841,7 +845,8 @@ def ai_assistant(req: https_fn.Request) -> https_fn.Response:
                         "room": pending_data.get("room"),
                         "startTime": pending_data.get("startTime"),
                         "duration": pending_data.get("duration"),
-                        "eventName": pending_data.get("eventName", "추천 예약")
+                        "eventName": pending_data.get("eventName", "추천 예약"),
+                        "eventParticipants": pending_data.get("eventParticipants")
                     }
                     return handle_reserve(reserve_query, userID)
 
@@ -855,7 +860,8 @@ def ai_assistant(req: https_fn.Request) -> https_fn.Response:
                     "room": pending_data.get("room"),
                     "startTime": pending_data.get("startTime"),
                     "duration": pending_data.get("duration"),
-                    "eventName": pending_data.get("eventName", "추천 예약")
+                    "eventName": pending_data.get("eventName", "추천 예약"),
+                    "eventParticipants": pending_data.get("eventParticipants")
                 }
                 return handle_reserve(query, userID)
 
