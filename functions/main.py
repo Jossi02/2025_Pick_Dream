@@ -72,12 +72,21 @@ def find_room(room_identifier):
     return None, None
 
 
+def parse_korean_time(time_str):
+    try:
+        if not time_str: return None
+        # "2026년 6월 26일 오전 9시 0분 0초 UTC+9" -> "2026년 6월 26일 AM 9시 0분 0초"
+        clean_str = time_str.replace("오전", "AM").replace("오후", "PM").replace(" UTC+9", "").strip()
+        dt = datetime.strptime(clean_str, "%Y년 %m월 %d일 %p %I시 %M분 %S초")
+        return dt.replace(tzinfo=KST)
+    except Exception as e:
+        logging.warning(f"[parse_korean_time] 파싱 실패: {time_str} - {e}")
+        return None
+
 def has_conflict(field: str, value: str, start, end, exclude_id: str = None):
-    # Firestore는 하나의 쿼리에서 여러 필드에 대한 부등호(<, >) 조회를 허용하지 않습니다.
-    # 따라서 startTimestamp로 범위를 좁히고, endTimestamp는 메모리에서 필터링해야 합니다.
-    conflicts = db.collection("Reservations") \
-        .where(field, "==", value) \
-        .where("startTimestamp", "<", end).stream()
+    # 인덱스 문제와 안드로이드 앱의 Extra Fields 크래시 문제를 해결하기 위해,
+    # startTimestamp/endTimestamp 필드 대신 문자열 startTime/endTime을 파싱하여 메모리에서 모두 비교합니다.
+    conflicts = db.collection("Reservations").where(field, "==", value).stream()
         
     logging.info(f"[has_conflict] field={field}, value={value}, exclude_id={exclude_id}")
     
@@ -86,15 +95,25 @@ def has_conflict(field: str, value: str, start, end, exclude_id: str = None):
             continue
             
         data = doc.to_dict()
+        
+        c_start = data.get("startTimestamp")
         c_end = data.get("endTimestamp")
         
-        # 데이터베이스에 잘못된 형식의 데이터(문자열 등)가 들어있을 경우 대비
+        # 만약 Timestamp 객체가 없다면 문자열에서 파싱
+        if not c_start or not hasattr(c_start, 'timestamp'):
+            c_start = parse_korean_time(data.get("startTime"))
+        if not c_end or not hasattr(c_end, 'timestamp'):
+            c_end = parse_korean_time(data.get("endTime"))
+            
+        if not c_start or not c_end:
+            continue
+            
         try:
-            # c_end가 datetime 객체이거나 Timestamp인 경우에만 비교
-            if c_end and hasattr(c_end, 'timestamp') and c_end > start:
+            # 겹치는 조건: 기존 예약의 시작시간이 새 예약의 종료시간보다 앞서고, 기존 예약의 종료시간이 새 예약의 시작시간보다 뒤일 때
+            if c_start < end and c_end > start:
                 return True
         except Exception as e:
-            logging.warning(f"[has_conflict] 날짜 비교 중 데이터 타입 오류 무시 (문서 ID: {doc.id}): {e}")
+            logging.warning(f"[has_conflict] 날짜 비교 중 오류 무시 (문서 ID: {doc.id}): {e}")
             continue
             
     return False
@@ -208,23 +227,23 @@ def handle_reserve(query, userID):
             numeric_part = re.search(r'\d+', participants_str)
             event_participants_int = int(numeric_part.group()) if numeric_part else 1
 
-            # 시간 문자열 생성 후 한국어 형식으로 변환
-            start_str = start.strftime("%Y년 %-m월 %-d일 %p %-I시 %M분 %S초 UTC+9").replace("AM", "오전").replace("PM", "오후")
-            end_str = end.strftime("%Y년 %-m월 %-d일 %p %-I시 %M분 %S초 UTC+9").replace("AM", "오전").replace("PM", "오후")
+            # 시간 문자열 생성 후 한국어 형식으로 변환 (안드로이드 앱과 동일한 형식 맞추기 위해 %-M, %-S 사용)
+            start_str = start.strftime("%Y년 %-m월 %-d일 %p %-I시 %-M분 %-S초 UTC+9").replace("AM", "오전").replace("PM", "오후")
+            end_str = end.strftime("%Y년 %-m월 %-d일 %p %-I시 %-M분 %-S초 UTC+9").replace("AM", "오전").replace("PM", "오후")
 
-            doc_ref = db.collection("Reservations").add({
+            res_doc = {
+                "documentId": "",
                 "roomID": query["room"],
                 "startTime": start_str,
                 "endTime": end_str,
-                "startTimestamp": start,
-                "endTimestamp": end,
-                "eventName": query.get("eventName", "AI 추천 예약"),
+                "eventName": query.get("eventName", "추천 예약"),
                 "eventDescription": query.get("eventDescription", ""),
                 "eventTarget": query.get("eventTarget", ""),
-                "eventParticipants": event_participants_int, # 정수형으로 저장
+                "eventParticipants": event_participants_int,
                 "status": query.get("status", "대기"),
                 "userID": userID
-            })
+            }
+            doc_ref = db.collection("Reservations").add(res_doc)
         except Exception as e:
             logging.exception("[handle_reserve] 예약 저장 실패")
             return https_fn.Response("예약 저장 중 오류가 발생했어요.", status=500)
@@ -335,10 +354,8 @@ def handle_change_reservation(query, userID):
             return https_fn.Response("해당 시간에 이미 강의실이 예약되어 있어요.", status=409)
 
         update_data = {
-            "startTimestamp": start,
-            "endTimestamp": end,
-            "startTime": start.strftime("%Y년 %-m월 %-d일 %p %-I시 %M분 %S초 UTC+9").replace("AM", "오전").replace("PM", "오후"),
-            "endTime": end.strftime("%Y년 %-m월 %-d일 %p %-I시 %M분 %S초 UTC+9").replace("AM", "오전").replace("PM", "오후"),
+            "startTime": start.strftime("%Y년 %-m월 %-d일 %p %-I시 %-M분 %-S초 UTC+9").replace("AM", "오전").replace("PM", "오후"),
+            "endTime": end.strftime("%Y년 %-m월 %-d일 %p %-I시 %-M분 %-S초 UTC+9").replace("AM", "오전").replace("PM", "오후"),
         }
 
         if new_participants:
