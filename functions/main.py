@@ -88,9 +88,14 @@ def has_conflict(field: str, value: str, start, end, exclude_id: str = None):
         data = doc.to_dict()
         c_end = data.get("endTimestamp")
         
-        # 예약의 종료 시간이 새로운 예약의 시작 시간보다 큰 경우 충돌!
-        if c_end and c_end > start:
-            return True
+        # 데이터베이스에 잘못된 형식의 데이터(문자열 등)가 들어있을 경우 대비
+        try:
+            # c_end가 datetime 객체이거나 Timestamp인 경우에만 비교
+            if c_end and hasattr(c_end, 'timestamp') and c_end > start:
+                return True
+        except Exception as e:
+            logging.warning(f"[has_conflict] 날짜 비교 중 데이터 타입 오류 무시 (문서 ID: {doc.id}): {e}")
+            continue
             
     return False
 
