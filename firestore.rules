@@ -30,8 +30,7 @@ service cloud.firestore {
 
     // Reservations 컬렉션 규칙
     match /Reservations/{reservationId} {
-      allow read, update, delete: if request.auth != null && request.auth.uid == resource.data.userID;
-      allow create: if request.auth != null && request.auth.uid == request.resource.data.userID;
+      allow read, write: if request.auth != null;
     }
   }
 }

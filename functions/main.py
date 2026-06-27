@@ -160,7 +160,7 @@ def handle_reserve(query, userID):
                 query["eventName"] = query.get("eventName") or pending_data.get("eventName", "추천 예약")
                 query["eventParticipants"] = query.get("eventParticipants") or pending_data.get("eventParticipants")
             else:
-                if not room_id:
+                if not room_id and query.get("room"):
                     return https_fn.Response("강의실 정보를 확인할 수 없어요.", status=400)
                 now = datetime.now(KST)
                 query["startTime"] = (now + timedelta(minutes=10)).isoformat(timespec="seconds")
@@ -169,7 +169,7 @@ def handle_reserve(query, userID):
                 query["eventParticipants"] = query.get("eventParticipants")
                 logging.info("[handle_reserve] Pending 없이 기본값으로 예약 진행")
 
-        if not room_id:
+        if not room_id and query.get("room"):
             return https_fn.Response("해당 강의실 정보를 확인할 수 없어요.", status=400)
             
         room_name = room_data.get("name", "") if room_data else ""
@@ -207,6 +207,62 @@ def handle_reserve(query, userID):
             
         query["status"] = "대기"
 
+        try:
+            query["duration"] = int(query.get("duration", 2))
+            start = datetime.fromisoformat(query["startTime"])
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=KST)
+        except Exception as e:
+            logging.exception(f"[handle_reserve] 시간 파싱 실패: {query.get('startTime')}")
+            return https_fn.Response("시작 시간이 올바른 형식이 아니에요. (예: 내일 오후 3시)", status=400)
+
+        if query["duration"] < 1 or query["duration"] > 6:
+            return https_fn.Response("예약 시간은 최소 1시간, 최대 6시간까지만 가능합니다.", status=400)
+
+        now = datetime.now(KST)
+        if start < now:
+            return https_fn.Response("예약 시작 시간은 현재 시간 이후여야 해요.", status=400)
+
+        end = start + timedelta(hours=query["duration"])
+
+        # 자동으로 빈 강의실 찾기 로직
+        if not query.get("room") or str(query.get("room")).strip() == "":
+            try:
+                person_count = int(re.search(r'\d+', str(query.get("eventParticipants", "0"))).group())
+            except:
+                person_count = 0
+                
+            matched = []
+            for doc in db.collection("rooms").stream():
+                r_id = doc.id
+                r_data = doc.to_dict()
+                cap = r_data.get("capacity", 0)
+                if person_count > 0 and cap < person_count:
+                    continue
+                
+                # 중복 예약 확인
+                if not has_conflict("roomID", r_id, start, end):
+                    matched.append((cap, r_id, r_data))
+            
+            if not matched:
+                return https_fn.Response("해당 시간에 원하시는 인원을 수용할 수 있는 빈 강의실이 없습니다 😥", status=409)
+            
+            # 수용 인원이 가장 꼭 맞는 방 선택 (오름차순)
+            matched.sort()
+            _, best_room_id, best_r_data = matched[0]
+            
+            best_room_name = best_r_data.get("name", "")
+            extracted = extract_room_id(best_room_name)
+            
+            if best_r_data.get("roomID"):
+                query["room"] = str(best_r_data.get("roomID"))
+            elif best_r_data.get("roomId"):
+                query["room"] = str(best_r_data.get("roomId"))
+            elif extracted:
+                query["room"] = extracted
+            else:
+                query["room"] = best_room_id
+
         required_fields = ["room", "startTime", "duration", "userID", "eventParticipants"]
         missing = [f for f in required_fields if not query.get(f) or str(query.get(f)).strip() == ""]
         if missing:
@@ -221,28 +277,12 @@ def handle_reserve(query, userID):
             readable = ", ".join(friendly_names.get(f, f) for f in missing)
             return https_fn.Response(f"다음 정보가 필요해요: {readable}", status=400)
 
-        try:
-            query["duration"] = int(query["duration"])
-            start = datetime.fromisoformat(query["startTime"])
-            if start.tzinfo is None:
-                start = start.replace(tzinfo=KST)
-        except Exception as e:
-            logging.exception(f"[handle_reserve] 시간 파싱 실패: {query.get('startTime')}")
-            return https_fn.Response("시작 시간이 올바른 형식이 아니에요.", status=400)
-
-        if query["duration"] < 1 or query["duration"] > 6:
-            return https_fn.Response("예약 시간은 최소 1시간, 최대 6시간까지만 가능합니다.", status=400)
-
-        now = datetime.now(KST)
-        if start < now:
-            return https_fn.Response("예약 시작 시간은 현재 시간 이후여야 해요.", status=400)
-
-        end = start + timedelta(hours=query["duration"])
-
         if has_conflict("userID", userID, start, end):
             return https_fn.Response("해당 시간에 이미 예약한 강의실이 있어요. 다른 시간대를 선택해 주세요.", status=409)
+            
+        _, room_data = find_room(query["room"])
         if has_conflict("roomID", query["room"], start, end):
-            room_name = room_data.get("name", query["room"])
+            room_name = room_data.get("name", query["room"]) if room_data else query["room"]
             return https_fn.Response(f"{room_name}은 해당 시간에 이미 예약되어 있어요.", status=409)
 
         try:
@@ -271,7 +311,7 @@ def handle_reserve(query, userID):
             doc_ref = db.collection("Reservations").add(res_doc)
         except Exception as e:
             logging.exception("[handle_reserve] 예약 저장 실패")
-            return https_fn.Response("예약 저장 중 오류가 발생했어요.", status=500)
+            return https_fn.Response(f"예약 저장 중 오류가 발생했어요. (상세에러: {str(e)})", status=500)
 
         try:
             db.collection("PendingReservations").document(userID).delete()
@@ -279,7 +319,7 @@ def handle_reserve(query, userID):
             logging.warning(f"[handle_reserve] Pending 삭제 실패: {e}")
 
         logging.info(f"[handle_reserve] 예약 성공: {doc_ref[1].id}")
-        room_name = room_data.get("name", query["room"])
+        room_name = room_data.get("name", query["room"]) if room_data else query["room"]
         return https_fn.Response(f"{room_name}이 예약되었습니다 ✅", status=200)
 
     except Exception as e:
@@ -460,7 +500,6 @@ def handle_recommend_room(query, userID):
     )
     if person_count is None and query.get("eventParticipants"):
         try:
-            import re
             num = re.search(r'\d+', str(query.get("eventParticipants")))
             if num:
                 person_count = int(num.group())
@@ -715,7 +754,7 @@ def ai_assistant(req: https_fn.Request) -> https_fn.Response:
             types.Tool(
                 function_declarations=[
                     types.FunctionDeclaration(name="query_equipment", description="특정 강의실의 특정 기자재 유무 확인", parameters=types.Schema(type="OBJECT", properties={"room": types.Schema(type="STRING"), "item": types.Schema(type="STRING")}, required=["room", "item"])),
-                    types.FunctionDeclaration(name="reserve", description="특정 강의실 예약. 사용자가 강의실 이름, 시간, 인원을 모두 명시적으로 말했을 때 호출.", parameters=types.Schema(type="OBJECT", properties={"room": types.Schema(type="STRING"), "startTime": types.Schema(type="STRING"), "duration": types.Schema(type="INTEGER"), "eventParticipants": types.Schema(type="INTEGER")}, required=["room", "startTime", "eventParticipants"])),
+                    types.FunctionDeclaration(name="reserve", description="특정 강의실 예약. 사용자가 빈 강의실을 알아서 예약해달라고 하면 room 파라미터를 생략해서 호출하세요.", parameters=types.Schema(type="OBJECT", properties={"room": types.Schema(type="STRING", description="강의실 이름. 빈 강의실 알아서 예약시 생략가능"), "startTime": types.Schema(type="STRING"), "duration": types.Schema(type="INTEGER"), "eventParticipants": types.Schema(type="INTEGER")}, required=["startTime", "eventParticipants"])),
                     types.FunctionDeclaration(name="cancel_reservation", description="예약 취소", parameters=types.Schema(type="OBJECT", properties={"room": types.Schema(type="STRING")}, required=["room"])),
                     types.FunctionDeclaration(name="change_reservation", description="예약 변경", parameters=types.Schema(type="OBJECT", properties={"room": types.Schema(type="STRING"), "startTime": types.Schema(type="STRING"), "duration": types.Schema(type="INTEGER"), "eventParticipants": types.Schema(type="INTEGER")}, required=["room"])),
                     types.FunctionDeclaration(name="latest_notice", description="최신 공지 확인", parameters=types.Schema(type="OBJECT", properties={})),
@@ -742,7 +781,8 @@ def ai_assistant(req: https_fn.Request) -> https_fn.Response:
 **중요 지침:**
 - 단순 대화는 텍스트로 자연스럽게 답변하세요.
 - 예약, 검색, 정보 조회가 필요하면 반드시 적절한 도구(Function)를 호출하세요.
-- 예약을 확정(reserve)하려면 '강의실 이름', '시작 시간', '인원수'가 모두 필요합니다. 하나라도 부족하면 recommend_room을 호출하거나 직접 질문하세요.
+- 예약을 확정(reserve)하려면 '시작 시간', '인원수'가 반드시 필요합니다.
+- 사용자가 "알아서 예약해줘", "빈 방 예약해줘" 등 강의실 이름을 명시하지 않고 예약을 원하면 직접 되묻지 말고, **'reserve' 도구의 'room' 파라미터를 생략**하여 즉시 알아서 예약되도록 하세요.
 - 절대 임의의 강의실이나 시간을 지어내지 마세요.
 """
 
@@ -753,7 +793,7 @@ def ai_assistant(req: https_fn.Request) -> https_fn.Response:
 
         try:
             response = genai_client.models.generate_content(
-                model='gemini-2.5-flash-lite',
+                model='gemini-2.5-flash',
                 contents=contents,
                 config=types.GenerateContentConfig(
                     system_instruction=system_prompt,
@@ -763,7 +803,7 @@ def ai_assistant(req: https_fn.Request) -> https_fn.Response:
             )
         except Exception as e:
             logging.exception(f"[Gemini 호출 실패]: {e}")
-            return https_fn.Response("AI 서버가 혼잡하여 요청을 처리할 수 없어요.", status=500)
+            return https_fn.Response(f"AI 서버가 혼잡하여 요청을 처리할 수 없어요. (에러: {str(e)})", status=500)
 
         bot_text = ""
         is_history_clear = False
@@ -825,4 +865,4 @@ def ai_assistant(req: https_fn.Request) -> https_fn.Response:
 
     except Exception as e:
         logging.exception("예외 발생:")
-        return https_fn.Response("알 수 없는 오류가 발생했어요. 잠시 후 다시 시도해 주세요.", status=500)
+        return https_fn.Response(f"알 수 없는 오류가 발생했어요. (에러: {str(e)})", status=500)
