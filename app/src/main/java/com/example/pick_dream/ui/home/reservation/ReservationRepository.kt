@@ -1,6 +1,7 @@
 package com.example.pick_dream.ui.home.reservation
 
 import com.example.pick_dream.model.Reservation
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.ktx.firestore
 import com.google.firebase.firestore.ktx.toObject
@@ -76,7 +77,10 @@ object ReservationRepository {
      */
     suspend fun addReservation(reservation: Reservation): Boolean {
         return try {
-            db.collection("Reservations").add(reservation).await()
+            val ownerUid = FirebaseAuth.getInstance().currentUser?.uid ?: return false
+            db.collection("Reservations")
+                .add(reservation.copy(ownerUid = ownerUid))
+                .await()
             true
         } catch (e: Exception) {
             false

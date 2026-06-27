@@ -2,6 +2,18 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isReservationOwner(data) {
+      return isSignedIn() && (
+        ('ownerUid' in data && data.ownerUid == request.auth.uid) ||
+        (!('ownerUid' in data) &&
+          get(/databases/$(database)/documents/User/$(request.auth.uid)).data.studentId == data.userID)
+      );
+    }
+
     // 유저 전용 문서 및 서브컬렉션 허용
     match /User/{uid} {
       allow read, write: if request.auth.uid == uid;
@@ -30,7 +42,14 @@ service cloud.firestore {
 
     // Reservations 컬렉션 규칙
     match /Reservations/{reservationId} {
-      allow read, write: if request.auth != null;
+      // 강의실의 예약 가능 시간 조회를 위해 읽기는 로그인 사용자에게 허용합니다.
+      // 생성/변경/삭제는 본인 예약에만 허용합니다.
+      allow read: if isSignedIn();
+      allow create: if isReservationOwner(request.resource.data);
+      allow update: if isReservationOwner(resource.data)
+                    && isReservationOwner(request.resource.data)
+                    && request.resource.data.userID == resource.data.userID;
+      allow delete: if isReservationOwner(resource.data);
     }
   }
 }

@@ -3,6 +3,7 @@ package com.example.pick_dream.model
 
 data class Reservation(
     var documentId: String = "",
+    val ownerUid: String = "",
     val userID: String = "",
     val roomID: String = "",
     val eventName: String = "",

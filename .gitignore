@@ -26,6 +26,9 @@ test.html
 firestore-debug.log
 app/*.json
 functions/*.json
+**/serviceAccountKey.json
 *.exe
 *.zip
 
+
+node_modules/

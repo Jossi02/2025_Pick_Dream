@@ -56,3 +56,25 @@
 - **Functions**: `functions/main.py`에 AI 코어 로직이 전부 담겨있습니다. 향후 배포 시 `firebase deploy --only functions` 를 실행하세요.
 - **Rules**: 앱에서 수동 예약이 잘 되게 하려면 변경된 `firestore.rules`를 꼭 덮어씌우거나 `firebase deploy --only firestore:rules` 로 배포해야 합니다.
 - **Git 통합**: `feature/ai-refactoring` 브랜치의 모든 작업 내역을 `main` 브랜치로 병합(Merge)해 두었습니다!
+
+---
+
+## 5. 2026-06-27 Codex 점검 및 안정화
+
+- 예약·날짜·강의실 ID 처리를 `functions/reservation_utils.py`로 분리하고 순수 단위 테스트를 추가했습니다.
+- 방을 지정하지 않은 예약에서 사용자가 전달한 시간을 임의의 기본값으로 덮어쓰던 문제를 제거했습니다. 예약 시간은 필수이며, 이용 시간만 2시간을 기본값으로 사용합니다.
+- 자동 배정과 추천이 Firestore 문서 해시가 아니라 앱이 저장하는 정규화된 `roomID`로 충돌을 검사하도록 통일했습니다.
+- 예약 취소·변경도 같은 정규화된 `roomID` 기준으로 조회하도록 맞췄습니다. 예약 시간 변경 시 `startTimestamp`/`endTimestamp`도 함께 갱신되도록 수정했습니다.
+- 문자열로 저장된 기존 예약 시간도 추천 시 충돌 검사에 반영하고, 취소·거절 예약은 충돌에서 제외했습니다.
+- 예약 문서에 Firebase Auth UID인 `ownerUid`를 추가했습니다. Firestore 쓰기 규칙은 생성·수정·삭제를 예약 소유자에게만 허용하며, 기존 문서는 학번으로 소유자를 판별합니다.
+- 챗봇 요청 본문과 메시지 길이를 검증하고, 내부 예외 상세가 사용자 응답으로 노출되지 않도록 정리했습니다.
+- `ChatHistory` 문서를 최근 10개 메시지로 제한해 문서가 무한히 커지지 않도록 했습니다.
+- UTF-16으로 저장되어 Android 테스트 빌드를 깨뜨리던 `DateParseTest.java`를 UTF-8 테스트로 교체했습니다.
+- 모든 경로의 `serviceAccountKey.json`을 Git에서 제외하도록 ignore 규칙을 강화했습니다. 이미 노출된 키는 GCP/Firebase에서 폐기하고 새 키로 교체해야 합니다.
+
+### 검증 명령
+
+```bash
+python -m unittest discover -s functions/tests -v
+./gradlew test
+```
