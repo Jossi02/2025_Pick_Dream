@@ -10,9 +10,10 @@
     <androidx.appcompat.widget.Toolbar
         android:id="@+id/dialogToolbar"
         android:layout_width="match_parent"
-        android:layout_height="56dp"
+        android:layout_height="80dp"
         android:background="#3C5ABD"
         app:navigationIcon="@drawable/ic_arrow_back"
+        app:contentInsetStartWithNavigation="16dp"
         app:title="지도"
         app:titleTextColor="@android:color/white"/>
 
@@ -23,7 +24,7 @@
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:layout_gravity="top|center_horizontal"
-        android:layout_marginTop="68dp">
+        android:layout_marginTop="92dp">
 
         <View android:layout_width="8dp" android:layout_height="8dp"
             android:background="@drawable/dot_selected"
@@ -40,7 +41,7 @@
         android:id="@+id/imagePager"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:layout_marginTop="56dp" />
+        android:layout_marginTop="80dp" />
 
     <!-- 우측 상단 X 버튼 -->
     <ImageButton

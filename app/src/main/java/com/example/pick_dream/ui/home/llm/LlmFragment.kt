@@ -12,7 +12,13 @@ import com.example.pick_dream.R
 import androidx.navigation.fragment.findNavController
 import androidx.navigation.NavOptions
 import androidx.activity.OnBackPressedCallback
+import androidx.lifecycle.lifecycleScope
+import com.example.pick_dream.notification.PickDreamNotificationManager
+import com.example.pick_dream.ui.home.reservation.ReservationRepository
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 
 class LlmFragment : Fragment() {
     private var _binding: FragmentLlmBinding? = null
@@ -127,6 +133,7 @@ class LlmFragment : Fragment() {
                             messages.add(LlmMessage(reply, false))
                             adapter.notifyItemInserted(messages.size - 1)
                             binding.recyclerView.scrollToPosition(messages.size - 1)
+                            handleNotificationSideEffects(reply)
                         }
                     },
                     onFailure = { e ->
@@ -141,6 +148,51 @@ class LlmFragment : Fragment() {
                 adapter.notifyItemInserted(messages.size - 1)
             }
         }
+    }
+
+    private fun handleNotificationSideEffects(reply: String) {
+        when {
+            "취소되었습니다" in reply -> {
+                PickDreamNotificationManager.showReservationCanceled(
+                    requireContext(),
+                    extractRoomName(reply)
+                )
+                scheduleUpcomingUsageReminders()
+            }
+
+            "예약되었습니다" in reply || "변경되었습니다" in reply -> {
+                PickDreamNotificationManager.showReservationComplete(
+                    requireContext(),
+                    extractRoomName(reply)
+                )
+                scheduleUpcomingUsageReminders()
+            }
+        }
+    }
+
+    private fun scheduleUpcomingUsageReminders() {
+        viewLifecycleOwner.lifecycleScope.launch {
+            val currentUser = FirebaseAuth.getInstance().currentUser ?: return@launch
+            val userDoc = FirebaseFirestore.getInstance()
+                .collection("User")
+                .document(currentUser.uid)
+                .get()
+                .await()
+            val studentId = userDoc.getString("studentId") ?: userDoc.getString("userID")
+            if (studentId.isNullOrBlank() || !isAdded) return@launch
+
+            val reservations = ReservationRepository.getReservationsByUser(studentId)
+            if (!isAdded) return@launch
+
+            reservations.forEach { reservation ->
+                PickDreamNotificationManager.scheduleUsageReminder(requireContext(), reservation)
+            }
+        }
+    }
+
+    private fun extractRoomName(text: String): String? {
+        val match = Regex("""([0-9]{3,4}\s*강의실)""").find(text)
+        return match?.value?.replace("\\s+".toRegex(), " ")
     }
 
     override fun onDestroyView() {

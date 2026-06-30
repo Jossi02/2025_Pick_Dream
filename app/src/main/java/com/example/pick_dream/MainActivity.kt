@@ -6,6 +6,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.navigation.NavController
 import androidx.navigation.fragment.NavHostFragment
 import com.example.pick_dream.databinding.ActivityMainBinding
+import com.example.pick_dream.notification.PickDreamNotificationManager
 import com.example.pick_dream.ui.home.search.LectureRoomRepository
 import com.google.android.material.bottomnavigation.BottomNavigationView
 
@@ -20,6 +21,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         // 앱 시작 시 강의실 및 찜 목록 데이터 미리 로드
+        PickDreamNotificationManager.createChannels(this)
         LectureRoomRepository.fetchRooms()
         LectureRoomRepository.fetchFavoriteIds()
 

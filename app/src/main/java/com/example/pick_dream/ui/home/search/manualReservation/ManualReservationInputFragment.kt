@@ -15,6 +15,7 @@ import androidx.navigation.NavOptions
 import androidx.navigation.fragment.findNavController
 import com.example.pick_dream.R
 import com.example.pick_dream.model.Reservation
+import com.example.pick_dream.notification.PickDreamNotificationManager
 import com.google.android.material.button.MaterialButton
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
@@ -29,6 +30,7 @@ class ManualReservationInputFragment : Fragment() {
     private lateinit var etEventDetail: EditText
     private lateinit var etEventTarget: EditText
     private lateinit var etEventPeople: EditText
+    private var pendingReservationForNotification: Reservation? = null
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?,
@@ -106,6 +108,11 @@ class ManualReservationInputFragment : Fragment() {
 
         reservationViewModel.submitResult.observe(viewLifecycleOwner) { isSuccess ->
             if (isSuccess == true) {
+                pendingReservationForNotification?.let { reservation ->
+                    PickDreamNotificationManager.showReservationComplete(requireContext(), reservation)
+                    PickDreamNotificationManager.scheduleUsageReminder(requireContext(), reservation)
+                }
+                pendingReservationForNotification = null
                 showSuccessDialog()
                 reservationViewModel.clearSubmitResult()
             }
@@ -184,6 +191,7 @@ class ManualReservationInputFragment : Fragment() {
                         status = "대기"
                     )
                     
+                    pendingReservationForNotification = reservation
                     reservationViewModel.makeReservation(reservation)
                 }
             }
