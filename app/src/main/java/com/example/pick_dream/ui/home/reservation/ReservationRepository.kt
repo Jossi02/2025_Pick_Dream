@@ -35,14 +35,29 @@ object ReservationRepository {
      */
     suspend fun getReservationsByRoom(roomId: String): List<Reservation> {
         return try {
-            val snapshot = db.collection("Reservations")
-                .whereEqualTo("roomID", roomId)
-                .get()
-                .await()
+            val roomIds = buildList {
+                val normalized = roomId.trim()
+                if (normalized.isNotBlank()) add(normalized)
+                if (normalized.length == 4 && normalized.all { it.isDigit() }) {
+                    add(normalized.drop(1)) // Legacy manual reservations stored 202 instead of 7202.
+                }
+            }.distinct()
 
-            snapshot.documents.mapNotNull { doc ->
-                doc.toObject<Reservation>()?.apply { documentId = doc.id }
+            val reservationsByDocumentId = linkedMapOf<String, Reservation>()
+            roomIds.forEach { id ->
+                val snapshot = db.collection("Reservations")
+                    .whereEqualTo("roomID", id)
+                    .get()
+                    .await()
+
+                snapshot.documents.forEach { doc ->
+                    doc.toObject<Reservation>()?.apply { documentId = doc.id }?.let { reservation ->
+                        reservationsByDocumentId[doc.id] = reservation
+                    }
+                }
             }
+
+            reservationsByDocumentId.values.toList()
         } catch (e: Exception) {
             emptyList()
         }

@@ -27,6 +27,9 @@ firestore-debug.log
 app/*.json
 functions/*.json
 **/serviceAccountKey.json
+.secrets/
+*service-account*.json
+*firebase-adminsdk*.json
 *.exe
 *.zip
 

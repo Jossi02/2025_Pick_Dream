@@ -13,6 +13,7 @@ from reservation_utils import (  # noqa: E402
     format_korean_time,
     intervals_overlap,
     parse_korean_time,
+    parse_natural_korean_datetime,
     reservation_room_id,
 )
 
@@ -43,6 +44,51 @@ class ReservationUtilsTest(unittest.TestCase):
         second_end = datetime(2026, 6, 27, 12, tzinfo=KST)
         self.assertFalse(intervals_overlap(first_start, first_end, first_end, second_end))
         self.assertTrue(intervals_overlap(first_start, second_end, first_end, second_end))
+
+    def test_parse_natural_korean_datetime_relative_day(self):
+        now = datetime(2026, 6, 28, 1, 5, 0, tzinfo=KST)
+        parsed = parse_natural_korean_datetime("\uBAA8\uB808 \uC624\uC804 11\uC2DC\uC5D0 \uC0AC\uC6A9\uD560 \uAC15\uC758\uC2E4", now)
+        self.assertEqual(datetime(2026, 6, 30, 11, 0, 0, tzinfo=KST), parsed)
+
+    def test_parse_natural_korean_datetime_explicit_date(self):
+        now = datetime(2026, 6, 28, 1, 5, 0, tzinfo=KST)
+        parsed = parse_natural_korean_datetime("6\uC6D4 30\uC77C \uC624\uD6C4 2\uC2DC 30\uBD84", now)
+        self.assertEqual(datetime(2026, 6, 30, 14, 30, 0, tzinfo=KST), parsed)
+
+    def test_parse_natural_korean_datetime_half_hour(self):
+        now = datetime(2026, 6, 28, 1, 5, 0, tzinfo=KST)
+        parsed = parse_natural_korean_datetime("\uB0B4\uC77C \uC624\uD6C4 2\uC2DC \uBC18", now)
+        self.assertEqual(datetime(2026, 6, 29, 14, 30, 0, tzinfo=KST), parsed)
+
+    def test_parse_natural_korean_datetime_rolls_forward_without_date(self):
+        now = datetime(2026, 6, 28, 14, 5, 0, tzinfo=KST)
+        parsed = parse_natural_korean_datetime("\uC624\uD6C4 2\uC2DC", now)
+        self.assertEqual(datetime(2026, 6, 29, 14, 0, 0, tzinfo=KST), parsed)
+
+    def test_parse_natural_korean_datetime_uses_default_date_for_time_only_followup(self):
+        now = datetime(2026, 6, 28, 19, 47, 0, tzinfo=KST)
+        pending_start = datetime(2026, 6, 30, 11, 0, 0, tzinfo=KST)
+        parsed = parse_natural_korean_datetime(
+            "\uADF8\uB7EC\uBA74 12\uC2DC\uBD80\uD130\uB85C \uD574\uC918",
+            now,
+            default_date=pending_start,
+        )
+        self.assertEqual(datetime(2026, 6, 30, 12, 0, 0, tzinfo=KST), parsed)
+
+    def test_parse_natural_korean_datetime_explicit_date_overrides_default_date(self):
+        now = datetime(2026, 6, 28, 19, 47, 0, tzinfo=KST)
+        pending_start = datetime(2026, 6, 30, 11, 0, 0, tzinfo=KST)
+        parsed = parse_natural_korean_datetime(
+            "\uB0B4\uC77C 12\uC2DC\uBD80\uD130\uB85C \uD574\uC918",
+            now,
+            default_date=pending_start,
+        )
+        self.assertEqual(datetime(2026, 6, 29, 12, 0, 0, tzinfo=KST), parsed)
+
+    def test_parse_natural_korean_datetime_next_weekday(self):
+        now = datetime(2026, 6, 28, 14, 5, 0, tzinfo=KST)  # Sunday
+        parsed = parse_natural_korean_datetime("\uB2E4\uC74C\uC8FC \uC6D4\uC694\uC77C \uC624\uC804 10\uC2DC", now)
+        self.assertEqual(datetime(2026, 6, 29, 10, 0, 0, tzinfo=KST), parsed)
 
 
 if __name__ == "__main__":

@@ -30,9 +30,24 @@ class ManualReservationViewModel : ViewModel() {
     val existingReservations: LiveData<List<Reservation>> get() = _existingReservations
 
     fun loadExistingReservations(roomId: String) {
+        _existingReservations.value = null
         viewModelScope.launch {
             _existingReservations.value = ReservationRepository.getReservationsByRoom(roomId)
         }
+    }
+
+
+    fun isStartTimeInPast(year: Int, month: Int, day: Int, startHour: Int, startMinute: Int): Boolean {
+        val start = java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.YEAR, year)
+            set(java.util.Calendar.MONTH, month - 1)
+            set(java.util.Calendar.DAY_OF_MONTH, day)
+            set(java.util.Calendar.HOUR_OF_DAY, startHour)
+            set(java.util.Calendar.MINUTE, startMinute)
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }
+        return start.timeInMillis <= System.currentTimeMillis()
     }
 
     fun isTimeOverlapping(year: Int, month: Int, day: Int, startHour: Int, startMinute: Int, endHour: Int, endMinute: Int): Boolean {
@@ -81,6 +96,12 @@ class ManualReservationViewModel : ViewModel() {
                 val newStartMs = format.parse(reservation.startTime!!)?.time ?: 0L
                 val newEndMs = format.parse(reservation.endTime!!)?.time ?: 0L
                 
+                if (newStartMs <= System.currentTimeMillis()) {
+                    _errorMessage.value = "이미 지난 시간입니다."
+                    _submitResult.value = false
+                    return@launch
+                }
+
                 var isOverlapping = false
                 for (res in existingReservations) {
                     if (res.status == "취소" || res.status == "거절") continue

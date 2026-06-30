@@ -4,6 +4,7 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.Spinner
 import android.widget.TextView
 import androidx.fragment.app.Fragment
 import com.example.pick_dream.R
@@ -74,7 +75,15 @@ class ManualReservationFragment : Fragment() {
             val isTimeSelected = tvTimeSelect.text != "시간 선택"
 
             var isOverlapping = false
+            var isPastStartTime = false
             if (isDateSelected && isTimeSelected && selectedDay != null) {
+                isPastStartTime = reservationViewModel.isStartTimeInPast(
+                    selectedDay!!.year,
+                    selectedDay!!.month + 1,
+                    selectedDay!!.day,
+                    spinnerStartHour.selectedItem as Int,
+                    spinnerStartMinute.selectedItem as Int
+                )
                 isOverlapping = reservationViewModel.isTimeOverlapping(
                     selectedDay!!.year,
                     selectedDay!!.month + 1,
@@ -86,10 +95,16 @@ class ManualReservationFragment : Fragment() {
                 )
             }
 
-            val isValid = isDateSelected && isTimeSelected && !isOverlapping
+            val isReservationDataLoaded = reservationViewModel.existingReservations.value != null
+            val isValid = isDateSelected && isTimeSelected && isReservationDataLoaded && !isPastStartTime && !isOverlapping
             
             btnNext.isEnabled = isValid
-            btnNext.text = if (isOverlapping) "이미 예약된 시간입니다" else "다음"
+            btnNext.text = when {
+                isPastStartTime -> "이미 지난 시간입니다"
+                isOverlapping -> "이미 예약된 시간입니다"
+                isDateSelected && isTimeSelected && !isReservationDataLoaded -> "예약 확인 중..."
+                else -> "다음"
+            }
 
             btnNext.setBackgroundColor(
                 if (isValid)
@@ -138,7 +153,7 @@ class ManualReservationFragment : Fragment() {
 
         val building = arguments?.getString("building") ?: ""
         val roomName = arguments?.getString("roomName") ?: ""
-        val roomId = Regex("\\d+").find(roomName)?.value ?: ""
+        val roomId = resolveReservationRoomId(building, roomName)
         tvBuilding.text = building
         tvRoomName.text = roomName
         
@@ -260,56 +275,127 @@ class ManualReservationFragment : Fragment() {
 
         val hours = (9..21).toList()
         val minutes = listOf(0, 10, 20, 30, 40, 50)
-        spinnerStartHour.adapter = android.widget.ArrayAdapter(requireContext(), android.R.layout.simple_spinner_dropdown_item, hours)
-        spinnerEndHour.adapter = android.widget.ArrayAdapter(requireContext(), android.R.layout.simple_spinner_dropdown_item, hours)
-        spinnerStartMinute.adapter = android.widget.ArrayAdapter(requireContext(), android.R.layout.simple_spinner_dropdown_item, minutes)
-        spinnerEndMinute.adapter = android.widget.ArrayAdapter(requireContext(), android.R.layout.simple_spinner_dropdown_item, minutes)
+        val closingTotal = 21 * 60 + 30
+        val maxReservationMinutes = 6 * 60
+
+        fun createNumberAdapter(values: List<Int>) =
+            android.widget.ArrayAdapter(requireContext(), R.layout.item_time_spinner, values).apply {
+                setDropDownViewResource(R.layout.item_month_dropdown)
+            }
+
+        fun Spinner.intValues(): List<Int> =
+            (0 until adapter.count).mapNotNull { adapter.getItem(it) as? Int }
+
+        fun Spinner.selectedInt(): Int? = selectedItem as? Int
+
+        fun Spinner.selectValue(value: Int) {
+            val index = intValues().indexOf(value)
+            if (index >= 0) {
+                setSelection(index)
+            }
+        }
+
+        fun startMinutesFor(hour: Int): List<Int> =
+            minutes.filter { minute -> hour * 60 + minute < closingTotal }
+
+        fun updateStartMinuteSpinner(preferredStartMinute: Int? = spinnerStartMinute.selectedInt()) {
+            val selectedStartHour = spinnerStartHour.selectedInt() ?: hours.first()
+            val startMinutes = startMinutesFor(selectedStartHour)
+            spinnerStartMinute.adapter = createNumberAdapter(startMinutes)
+            val startMinuteIndex = startMinutes.indexOf(preferredStartMinute).takeIf { it >= 0 } ?: 0
+            spinnerStartMinute.setSelection(startMinuteIndex)
+        }
+
+        fun attachNumberDropdown(spinner: Spinner, valuesProvider: () -> List<Int>, afterSelect: () -> Unit = {}) {
+            spinner.setOnTouchListener { _, event ->
+                if (event.action == android.view.MotionEvent.ACTION_UP) {
+                    NumberDropdownPopup(requireContext()).show(
+                        anchor = spinner,
+                        values = valuesProvider(),
+                        selectedValue = spinner.selectedInt()
+                    ) { value ->
+                        spinner.selectValue(value)
+                        afterSelect()
+                    }
+                }
+                true
+            }
+        }
+
+        spinnerStartHour.adapter = createNumberAdapter(hours)
+        spinnerEndHour.adapter = createNumberAdapter(hours)
+        spinnerStartMinute.adapter = createNumberAdapter(minutes)
+        spinnerEndMinute.adapter = createNumberAdapter(minutes)
+
+        reservationViewModel.startHour?.let { spinnerStartHour.selectValue(it) }
+        reservationViewModel.startMinute?.let { spinnerStartMinute.selectValue(it) }
+        updateStartMinuteSpinner(reservationViewModel.startMinute)
+
+        attachNumberDropdown(spinnerStartHour, { hours }) {
+            updateTimeText()
+        }
+        attachNumberDropdown(spinnerStartMinute, { spinnerStartMinute.intValues() }) {
+            updateTimeText()
+        }
+        attachNumberDropdown(spinnerEndHour, { spinnerEndHour.intValues() }) {
+            updateTimeText()
+        }
+        attachNumberDropdown(spinnerEndMinute, { spinnerEndMinute.intValues() }) {
+            updateTimeText()
+        }
 
         updateButtonState()
+
+        var endMinutesMap: Map<Int, List<Int>> = emptyMap()
+
+        fun updateEndMinuteSpinner(preferredEndMinute: Int? = spinnerEndMinute.selectedInt()) {
+            val selectedEndHour = spinnerEndHour.selectedInt() ?: return
+            val endMinutes = endMinutesMap[selectedEndHour] ?: listOf(0)
+            spinnerEndMinute.adapter = createNumberAdapter(endMinutes)
+            val endMinuteIndex = endMinutes.indexOf(preferredEndMinute).takeIf { it >= 0 } ?: 0
+            spinnerEndMinute.setSelection(endMinuteIndex)
+        }
 
         fun updateEndTimeSpinners() {
             val startHour = spinnerStartHour.selectedItem as Int
             val startMinute = spinnerStartMinute.selectedItem as Int
             val startTotal = startHour * 60 + startMinute
-            val maxEndTotal = minOf(startTotal + 6 * 60, 21 * 60 + 30)
+            val maxEndTotal = minOf(startTotal + maxReservationMinutes, closingTotal)
             val minutes = listOf(0, 10, 20, 30, 40, 50)
 
             val endTimes = mutableListOf<Pair<Int, Int>>()
             for (h in hours) {
                 for (m in minutes) {
                     val total = h * 60 + m
-                    if (total > startTotal && total <= maxEndTotal && total <= 21 * 60 + 30) {
+                    if (total > startTotal && total <= maxEndTotal && total <= closingTotal) {
                         endTimes.add(h to m)
                     }
                 }
             }
             val endHours = endTimes.map { it.first }.distinct()
-            val endMinutesMap = endHours.associateWith { h -> endTimes.filter { it.first == h }.map { it.second } }
+            endMinutesMap = endHours.associateWith { h -> endTimes.filter { it.first == h }.map { it.second } }
 
-            val prevEndHour = spinnerEndHour.selectedItem as? Int ?: endHours.firstOrNull() ?: hours.first()
-            val prevEndMinute = spinnerEndMinute.selectedItem as? Int ?: 0
+            val prevEndHour = spinnerEndHour.selectedInt() ?: endHours.firstOrNull() ?: hours.first()
+            val prevEndMinute = spinnerEndMinute.selectedInt() ?: 0
 
-            val endHourAdapter = android.widget.ArrayAdapter(requireContext(), android.R.layout.simple_spinner_dropdown_item, endHours)
-            spinnerEndHour.adapter = endHourAdapter
+            spinnerEndHour.adapter = createNumberAdapter(endHours)
             val endHourIndex = endHours.indexOf(prevEndHour).takeIf { it >= 0 } ?: 0
             spinnerEndHour.setSelection(endHourIndex)
+            updateEndMinuteSpinner(prevEndMinute)
+            updateTimeText()
+        }
 
-            spinnerEndHour.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
-                override fun onItemSelected(parent: android.widget.AdapterView<*>, view: View?, position: Int, id: Long) {
-                    val selectedEndHour = endHours[position]
-                    val endMinutes = endMinutesMap[selectedEndHour] ?: listOf(0)
-                    val endMinuteAdapter = android.widget.ArrayAdapter(requireContext(), android.R.layout.simple_spinner_dropdown_item, endMinutes)
-                    spinnerEndMinute.adapter = endMinuteAdapter
-                    val endMinuteIndex = endMinutes.indexOf(prevEndMinute).takeIf { it >= 0 } ?: 0
-                    spinnerEndMinute.setSelection(endMinuteIndex)
-                    updateTimeText()
-                }
-                override fun onNothingSelected(parent: android.widget.AdapterView<*>) {}
+        spinnerEndHour.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>, view: View?, position: Int, id: Long) {
+                updateEndMinuteSpinner()
+                updateTimeText()
             }
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>) {}
         }
 
         spinnerStartHour.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: android.widget.AdapterView<*>, view: View?, position: Int, id: Long) {
+                updateStartMinuteSpinner()
                 updateEndTimeSpinners()
             }
             override fun onNothingSelected(parent: android.widget.AdapterView<*>) {}
@@ -322,13 +408,12 @@ class ManualReservationFragment : Fragment() {
         }
 
         updateEndTimeSpinners()
-
-        spinnerEndHour.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: android.widget.AdapterView<*>, view: View?, position: Int, id: Long) {
-                updateTimeText()
-            }
-            override fun onNothingSelected(parent: android.widget.AdapterView<*>) {}
+        reservationViewModel.endHour?.let {
+            spinnerEndHour.selectValue(it)
+            updateEndMinuteSpinner(reservationViewModel.endMinute)
         }
+        reservationViewModel.endMinute?.let { spinnerEndMinute.selectValue(it) }
+
         spinnerEndMinute.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: android.widget.AdapterView<*>, view: View?, position: Int, id: Long) {
                 updateTimeText()
@@ -474,6 +559,23 @@ class ManualReservationFragment : Fragment() {
         popup.show()
     }
 
+
+    private fun resolveReservationRoomId(building: String, roomName: String): String {
+        Regex("""(?<!\d)\d{4}(?!\d)""").find(roomName)?.value?.let { return it }
+
+        val buildingNumber = Regex("""(?<!\d)\d(?!\d)""").find(building)?.value
+        val roomNumber = Regex("""(?<!\d)\d{2,3}(?!\d)""")
+            .findAll(roomName)
+            .lastOrNull()
+            ?.value
+
+        if (!buildingNumber.isNullOrBlank() && !roomNumber.isNullOrBlank()) {
+            return buildingNumber + roomNumber
+        }
+
+        return Regex("""\d+""").find(roomName)?.value ?: ""
+    }
+
     override fun onResume() {
         super.onResume()
         requireActivity().findViewById<View>(R.id.nav_view)?.visibility = View.GONE
@@ -490,4 +592,4 @@ class ManualReservationFragment : Fragment() {
         calendarView.addDecorator(SelectedDayDecorator(requireContext(), getSelectedDay))
         calendarView.addDecorator(PastDayDecorator(requireContext()))
     }
-} 
+}
