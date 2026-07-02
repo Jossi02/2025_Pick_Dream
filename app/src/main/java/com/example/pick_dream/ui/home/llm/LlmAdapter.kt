@@ -54,11 +54,7 @@ class LlmAdapter(
             if (reservations.isNotEmpty()) {
                 holder.binding.textMessage.visibility = View.GONE
                 holder.binding.reservationCardsContainer.visibility = View.VISIBLE
-                val headerText = if (message.text.startsWith("취소할 예약을 선택해 주세요:")) {
-                    "취소할 예약을 선택해 주세요"
-                } else {
-                    "현재 예약 및 예정된 예약"
-                }
+                val headerText = reservationHeaderText(message.text)
                 addReservationHeader(context, holder.binding.reservationCardsContainer, headerText)
                 reservations.forEach { reservation ->
                     holder.binding.reservationCardsContainer.addView(createReservationCard(context, reservation))
@@ -70,7 +66,11 @@ class LlmAdapter(
                 holder.binding.textMessage.setTextColor(context.getColor(android.R.color.black))
             }
 
-            val quickActions = parseQuickActions(message.text)
+            val quickActions = if (reservations.any { !it.actionLabel.isNullOrBlank() }) {
+                emptyList()
+            } else {
+                parseQuickActions(message.text)
+            }
             if (quickActions.isNotEmpty()) {
                 holder.binding.quickActionsContainer.visibility = View.VISIBLE
                 quickActions.forEach { action ->
@@ -94,7 +94,11 @@ class LlmAdapter(
     private fun parseReservationCards(text: String): List<ReservationCard> {
         val isReservationList = text.startsWith("현재 예약 및 예정된 예약:")
         val isCancelSelection = text.startsWith("취소할 예약을 선택해 주세요:")
-        if (!isReservationList && !isCancelSelection) return emptyList()
+        if (!isReservationList && !isCancelSelection) {
+            parseConfirmationCard(text)?.let { return listOf(it) }
+            parseAlternativeRoomCard(text)?.let { return listOf(it) }
+            return emptyList()
+        }
 
         return text
             .lineSequence()
@@ -125,6 +129,72 @@ class LlmAdapter(
                 )
             }
             .toList()
+    }
+
+    private fun reservationHeaderText(text: String): String {
+        return when {
+            text.startsWith("취소할 예약을 선택해 주세요:") -> "취소할 예약을 선택해 주세요"
+            text.startsWith("예약 내용을 확인해 주세요") -> "예약 내용을 확인해 주세요"
+            "대신" in text && "예약 가능" in text -> "대체 강의실 제안"
+            else -> "현재 예약 및 예정된 예약"
+        }
+    }
+
+    private fun parseConfirmationCard(text: String): ReservationCard? {
+        if (!text.startsWith("예약 내용을 확인해 주세요")) return null
+
+        val roomName = extractLineValue(text, "강의실") ?: return null
+        val timeRange = extractLineValue(text, "시간") ?: return null
+        val participants = extractLineValue(text, "인원")
+        val times = splitTimeRange(timeRange) ?: return null
+
+        return ReservationCard(
+            roomName = roomName,
+            startTime = simplifyKoreanDateTime(times.first),
+            endTime = simplifyKoreanDateTime(times.second),
+            participants = participants,
+            actionLabel = "예약 확정",
+            actionMessage = "예약확정"
+        )
+    }
+
+    private fun parseAlternativeRoomCard(text: String): ReservationCard? {
+        if (!("대신" in text && "예약 가능" in text)) return null
+
+        val roomName = Regex("""대신\s+(.+?)은\s+같은\s+시간에\s+예약\s+가능""")
+            .find(text)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.trim()
+            ?: return null
+        val timeRange = extractLineValue(text, "시간") ?: return null
+        val participants = extractLineValue(text, "인원")
+        val times = splitTimeRange(timeRange) ?: return null
+
+        return ReservationCard(
+            roomName = roomName,
+            startTime = simplifyKoreanDateTime(times.first),
+            endTime = simplifyKoreanDateTime(times.second),
+            participants = participants,
+            actionLabel = "예약 확정",
+            actionMessage = "예약확정"
+        )
+    }
+
+    private fun extractLineValue(text: String, label: String): String? {
+        return text
+            .lineSequence()
+            .map { it.trim() }
+            .firstOrNull { it.startsWith("$label:") }
+            ?.substringAfter(":")
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+    }
+
+    private fun splitTimeRange(value: String): Pair<String, String>? {
+        val parts = value.split(" ~ ", limit = 2)
+        if (parts.size != 2) return null
+        return parts[0].trim() to parts[1].trim()
     }
 
     private fun simplifyKoreanDateTime(value: String): String {
